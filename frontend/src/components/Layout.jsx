@@ -1,13 +1,20 @@
 import { Outlet, NavLink } from 'react-router-dom';
 import { ConnectButton } from '@rainbow-me/rainbowkit';
-import { FiHome, FiLayers, FiImage, FiLock, FiUsers } from 'react-icons/fi';
+import { FiHome, FiLayers, FiImage, FiLock, FiUsers, FiDroplet, FiCheckSquare, FiDollarSign, FiActivity, FiUser } from 'react-icons/fi';
+import { GiHammer } from 'react-icons/gi';
 
 const navItems = [
   { path: '/', icon: FiHome, label: 'Dashboard' },
   { path: '/staking', icon: FiLayers, label: 'Staking' },
+  { path: '/farming', icon: FiDroplet, label: 'Yield Farming' },
+  { path: '/lending', icon: FiDollarSign, label: 'Préstamos' },
   { path: '/nft', icon: FiImage, label: 'NFT Marketplace' },
+  { path: '/auctions', icon: FiActivity, label: 'Subastas NFT' },
+  { path: '/governance', icon: FiCheckSquare, label: 'Gobernanza' },
   { path: '/escrow', icon: FiLock, label: 'Escrow' },
   { path: '/multisig', icon: FiUsers, label: 'MultiSig' },
+  { path: '/analytics', icon: FiActivity, label: 'Analytics' },
+  { path: '/profile', icon: FiUser, label: 'Perfil' },
 ];
 
 function Layout() {

@@ -1,12 +1,25 @@
 import { getDefaultConfig } from '@rainbow-me/rainbowkit';
-import { mainnet, polygon, sepolia, localhost } from 'wagmi/chains';
+import { mainnet, polygon, sepolia, localhost, arbitrum, optimism, base, bsc } from 'wagmi/chains';
 
+// WalletConnect v2 configuration with extended chain support
 export const config = getDefaultConfig({
   appName: 'Crypto Suite',
-  projectId: 'YOUR_WALLETCONNECT_PROJECT_ID', // Get from https://cloud.walletconnect.com
-  chains: [localhost, sepolia, polygon, mainnet],
+  projectId: process.env.VITE_WALLETCONNECT_PROJECT_ID || 'YOUR_WALLETCONNECT_PROJECT_ID',
+  chains: [localhost, sepolia, mainnet, polygon, arbitrum, optimism, base, bsc],
   ssr: false,
 });
+
+// Supported chains metadata
+export const SUPPORTED_CHAINS = {
+  1: { name: 'Ethereum', symbol: 'ETH', explorer: 'https://etherscan.io' },
+  137: { name: 'Polygon', symbol: 'MATIC', explorer: 'https://polygonscan.com' },
+  42161: { name: 'Arbitrum', symbol: 'ETH', explorer: 'https://arbiscan.io' },
+  10: { name: 'Optimism', symbol: 'ETH', explorer: 'https://optimistic.etherscan.io' },
+  8453: { name: 'Base', symbol: 'ETH', explorer: 'https://basescan.org' },
+  56: { name: 'BSC', symbol: 'BNB', explorer: 'https://bscscan.com' },
+  11155111: { name: 'Sepolia', symbol: 'ETH', explorer: 'https://sepolia.etherscan.io' },
+  31337: { name: 'Localhost', symbol: 'ETH', explorer: '' },
+};
 
 // Contract addresses - update after deployment
 export const CONTRACT_ADDRESSES = {

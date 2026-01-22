@@ -6,6 +6,12 @@ import Staking from './pages/Staking';
 import NFTMarketplace from './pages/NFTMarketplace';
 import Escrow from './pages/Escrow';
 import MultiSig from './pages/MultiSig';
+import YieldFarming from './pages/YieldFarming';
+import Governance from './pages/Governance';
+import Lending from './pages/Lending';
+import NFTAuctions from './pages/NFTAuctions';
+import Analytics from './pages/Analytics';
+import Profile from './pages/Profile';
 
 function App() {
   return (
@@ -27,6 +33,12 @@ function App() {
           <Route path="nft" element={<NFTMarketplace />} />
           <Route path="escrow" element={<Escrow />} />
           <Route path="multisig" element={<MultiSig />} />
+          <Route path="farming" element={<YieldFarming />} />
+          <Route path="governance" element={<Governance />} />
+          <Route path="lending" element={<Lending />} />
+          <Route path="auctions" element={<NFTAuctions />} />
+          <Route path="analytics" element={<Analytics />} />
+          <Route path="profile" element={<Profile />} />
         </Route>
       </Routes>
     </>
