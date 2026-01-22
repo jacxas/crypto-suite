@@ -1,0 +1,14 @@
+node_modules
+npm-debug.log
+.env
+.env.local
+.git
+.gitignore
+README.md
+LICENSE
+*.md
+logs/*
+!logs/.gitkeep
+deploy.log
+.DS_Store
+Thumbs.db

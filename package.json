@@ -1,0 +1,35 @@
+{
+  "name": "crypto-suite",
+  "version": "1.0.0",
+  "type": "module",
+  "engines": {
+    "node": ">=22.0.0"
+  },
+  "scripts": {
+    "compile": "hardhat compile",
+    "deploy": "node crypto-suite-complete.js deploy",
+    "start": "node crypto-suite-complete.js start",
+    "dev": "node --watch crypto-suite-complete.js start",
+    "test": "node crypto-suite-complete.js test"
+  },
+  "dependencies": {
+    "bcryptjs": "^2.4.3",
+    "cors": "^2.8.5",
+    "dotenv": "^16.4.5",
+    "ethers": "^6.13.0",
+    "express": "^4.21.0",
+    "express-rate-limit": "^7.3.1",
+    "helmet": "^7.1.0",
+    "jsonwebtoken": "^9.0.2",
+    "mongoose": "^8.4.1",
+    "morgan": "^1.10.0",
+    "openai": "^4.28.0",
+    "prom-client": "^15.1.2",
+    "winston": "^3.13.0"
+  },
+  "devDependencies": {
+    "@nomicfoundation/hardhat-toolbox": "^4.0.0",
+    "@openzeppelin/contracts": "^5.0.0",
+    "hardhat": "^2.19.0"
+  }
+}

@@ -1,0 +1,10 @@
+{
+  "name": "Crypto Token #10",
+  "description": "Token exclusivo de la colección Crypto Suite",
+  "image": "/assets/tokens/token-10.jpg",
+  "attributes": [
+    { "trait_type": "Rarity", "value": "Epic" },
+    { "trait_type": "Power", "value": 85 },
+    { "trait_type": "Element", "value": "Cosmic" }
+  ]
+}

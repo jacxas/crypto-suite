@@ -1,0 +1,10 @@
+{
+  "name": "Crypto Token #6",
+  "description": "Token exclusivo de la colección Crypto Suite",
+  "image": "/assets/tokens/token-6.jpg",
+  "attributes": [
+    { "trait_type": "Rarity", "value": "Epic" },
+    { "trait_type": "Power", "value": 78 },
+    { "trait_type": "Element", "value": "Ice" }
+  ]
+}

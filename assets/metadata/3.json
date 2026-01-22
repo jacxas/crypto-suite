@@ -1,0 +1,10 @@
+{
+  "name": "Crypto Token #3",
+  "description": "Token exclusivo de la colección Crypto Suite",
+  "image": "/assets/tokens/token-3.jpg",
+  "attributes": [
+    { "trait_type": "Rarity", "value": "Rare" },
+    { "trait_type": "Power", "value": 67 },
+    { "trait_type": "Element", "value": "Earth" }
+  ]
+}

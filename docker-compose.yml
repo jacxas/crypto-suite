@@ -1,0 +1,44 @@
+version: '3.9'
+
+services:
+  backend:
+    build: .
+    container_name: crypto-suite-backend
+    restart: always
+    environment:
+      - NODE_ENV=production
+      - PORT=3000
+      - MONGODB_URI=mongodb://mongo:27017/crypto-suite
+      - RPC_URL=${RPC_URL}
+      - PRIVATE_KEY=${PRIVATE_KEY}
+      - TOKEN_ADDRESS=${TOKEN_ADDRESS}
+      - NFT_ADDRESS=${NFT_ADDRESS}
+      - MARKETPLACE_ADDRESS=${MARKETPLACE_ADDRESS}
+      - JWT_SECRET=${JWT_SECRET}
+    ports:
+      - "3000:3000"
+    depends_on:
+      - mongo
+    networks:
+      - crypto-suite-network
+
+  mongo:
+    image: mongo:7
+    container_name: crypto-suite-mongo
+    restart: always
+    environment:
+      MONGO_INITDB_ROOT_USERNAME: admin
+      MONGO_INITDB_ROOT_PASSWORD: admin123
+    volumes:
+      - mongo-data:/data/db
+    ports:
+      - "27017:27017"
+    networks:
+      - crypto-suite-network
+
+volumes:
+  mongo-data:
+
+networks:
+  crypto-suite-network:
+    driver: bridge

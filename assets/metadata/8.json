@@ -1,0 +1,10 @@
+{
+  "name": "Crypto Token #8",
+  "description": "Token exclusivo de la colección Crypto Suite",
+  "image": "/assets/tokens/token-8.jpg",
+  "attributes": [
+    { "trait_type": "Rarity", "value": "Legendary" },
+    { "trait_type": "Power", "value": 99 },
+    { "trait_type": "Element", "value": "Light" }
+  ]
+}

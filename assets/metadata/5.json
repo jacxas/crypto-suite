@@ -1,0 +1,10 @@
+{
+  "name": "Crypto Token #5",
+  "description": "Token exclusivo de la colección Crypto Suite",
+  "image": "/assets/tokens/token-5.jpg",
+  "attributes": [
+    { "trait_type": "Rarity", "value": "Common" },
+    { "trait_type": "Power", "value": 45 },
+    { "trait_type": "Element", "value": "Lightning" }
+  ]
+}

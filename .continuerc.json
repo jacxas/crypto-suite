@@ -1,0 +1,20 @@
+{
+  "systemMessage": "You are an expert AI coding assistant for the Crypto Suite project.\n\n# Architecture Overview\n\nMonolithic Node.js app in crypto-suite-complete.js integrating blockchain (ERC-20/721/marketplace), REST API, web frontend, and AI agent. Uses ethers.js (v6 backend, v5 frontend), Express, MongoDB (optional), inline HTML/JS.\n\n- Smart Contracts: AdvancedToken (staking with rewards), NFTCollection, NFTMarketplace\n- Backend: JWT auth via MetaMask, rate-limited APIs, Prometheus metrics, Winston logs\n- Frontend: Web3 UI with MetaMask, direct ethers calls, inline HTML served from backend\n- AI: GPT-4 for chat, analysis, auto-compounding decisions with structured JSON prompts\n- Deployment: Docker + MongoDB, automated deploy scripts\n\n# Key Conventions\n\n- Single File: All code in crypto-suite-complete.js\n- Config: dotenv for env vars\n- Error Handling: Async try-catch, Winston logs\n- Auth: Nonce-based JWT with ethers.verifyMessage()\n- Blockchain: JsonRpcProvider for queries, Wallet for transactions\n- Frontend: Vanilla JS, ethers v5 CDN, modal-based NFT gallery\n- AI: Structured GPT-4 prompts with JSON parsing\n- Database: MongoDB optional with graceful fallback\n\n# Integration Patterns\n\n- MetaMask: window.ethereum connect, sign messages\n- Contracts: ABI arrays inline + env addresses\n- DB: Mongoose models with User/Transaction schemas\n- Metrics: /metrics Prometheus endpoint\n- AI Endpoints: /api/ai/chat, /api/ai/analyze\n- NFT Metadata: assets/metadata/*.json\n- Gallery: Frontend loads from /api/gallery\n\nAlways follow these patterns when suggesting code changes.",
+  "customCommands": [
+    {
+      "name": "explain-crypto",
+      "description": "Explain crypto suite code",
+      "prompt": "Explain this code in the context of the Crypto Suite architecture. Focus on how it integrates with blockchain, API, and AI components."
+    },
+    {
+      "name": "add-feature",
+      "description": "Add new feature to crypto suite",
+      "prompt": "Add this feature following Crypto Suite conventions: single file architecture, ethers.js patterns, Winston logging, and proper error handling."
+    },
+    {
+      "name": "fix-bug",
+      "description": "Fix bug in crypto suite",
+      "prompt": "Fix this bug while maintaining Crypto Suite patterns: async/await error handling, proper blockchain transaction flow, and logging."
+    }
+  ]
+}
