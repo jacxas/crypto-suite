@@ -1,0 +1,49 @@
+{
+  "models": [
+    {
+      "title": "GPT-4",
+      "provider": "openai",
+      "model": "gpt-4",
+      "apiKey": ""
+    }
+  ],
+  "systemMessage": "You are an expert Solidity developer and blockchain architect. Help with smart contract development, testing, and deployment.",
+  "completionOptions": {
+    "temperature": 0.5,
+    "topP": 1,
+    "presencePenalty": 0,
+    "frequencyPenalty": 0
+  },
+  "slashCommands": [
+    {
+      "name": "edit",
+      "description": "Edit selected code"
+    },
+    {
+      "name": "comment",
+      "description": "Write comments for selected code"
+    },
+    {
+      "name": "share",
+      "description": "Export conversation to markdown"
+    },
+    {
+      "name": "cmd",
+      "description": "Generate a shell command"
+    }
+  ],
+  "contextProviders": [
+    {
+      "name": "diff",
+      "params": {}
+    },
+    {
+      "name": "open",
+      "params": {}
+    },
+    {
+      "name": "terminal",
+      "params": {}
+    }
+  ]
+}

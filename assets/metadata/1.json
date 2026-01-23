@@ -1,0 +1,19 @@
+{
+  "name": "CryptoSuite NFT #1",
+  "description": "First NFT from the CryptoSuite collection - A unique digital collectible",
+  "image": "ipfs://QmExample1/1.png",
+  "attributes": [
+    {
+      "trait_type": "Rarity",
+      "value": "Common"
+    },
+    {
+      "trait_type": "Background",
+      "value": "Blue"
+    },
+    {
+      "trait_type": "Edition",
+      "value": "Genesis"
+    }
+  ]
+}

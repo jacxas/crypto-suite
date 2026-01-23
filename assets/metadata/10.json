@@ -1,0 +1,19 @@
+{
+  "name": "CryptoSuite NFT #10",
+  "description": "Tenth NFT from the CryptoSuite collection - A unique digital collectible",
+  "image": "ipfs://QmExample1/10.png",
+  "attributes": [
+    {
+      "trait_type": "Rarity",
+      "value": "Mythic"
+    },
+    {
+      "trait_type": "Background",
+      "value": "Rainbow"
+    },
+    {
+      "trait_type": "Edition",
+      "value": "Genesis"
+    }
+  ]
+}

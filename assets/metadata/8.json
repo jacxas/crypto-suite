@@ -1,0 +1,19 @@
+{
+  "name": "CryptoSuite NFT #8",
+  "description": "Eighth NFT from the CryptoSuite collection - A unique digital collectible",
+  "image": "ipfs://QmExample1/8.png",
+  "attributes": [
+    {
+      "trait_type": "Rarity",
+      "value": "Common"
+    },
+    {
+      "trait_type": "Background",
+      "value": "Yellow"
+    },
+    {
+      "trait_type": "Edition",
+      "value": "Genesis"
+    }
+  ]
+}

@@ -1,0 +1,19 @@
+{
+  "name": "CryptoSuite NFT #4",
+  "description": "Fourth NFT from the CryptoSuite collection - A unique digital collectible",
+  "image": "ipfs://QmExample1/4.png",
+  "attributes": [
+    {
+      "trait_type": "Rarity",
+      "value": "Common"
+    },
+    {
+      "trait_type": "Background",
+      "value": "Red"
+    },
+    {
+      "trait_type": "Edition",
+      "value": "Genesis"
+    }
+  ]
+}

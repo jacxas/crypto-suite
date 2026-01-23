@@ -1,0 +1,19 @@
+{
+  "name": "CryptoSuite NFT #2",
+  "description": "Second NFT from the CryptoSuite collection - A unique digital collectible",
+  "image": "ipfs://QmExample1/2.png",
+  "attributes": [
+    {
+      "trait_type": "Rarity",
+      "value": "Uncommon"
+    },
+    {
+      "trait_type": "Background",
+      "value": "Green"
+    },
+    {
+      "trait_type": "Edition",
+      "value": "Genesis"
+    }
+  ]
+}

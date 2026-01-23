@@ -1,0 +1,19 @@
+{
+  "name": "CryptoSuite NFT #5",
+  "description": "Fifth NFT from the CryptoSuite collection - A unique digital collectible",
+  "image": "ipfs://QmExample1/5.png",
+  "attributes": [
+    {
+      "trait_type": "Rarity",
+      "value": "Epic"
+    },
+    {
+      "trait_type": "Background",
+      "value": "Gold"
+    },
+    {
+      "trait_type": "Edition",
+      "value": "Genesis"
+    }
+  ]
+}

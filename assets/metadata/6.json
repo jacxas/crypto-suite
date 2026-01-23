@@ -1,0 +1,19 @@
+{
+  "name": "CryptoSuite NFT #6",
+  "description": "Sixth NFT from the CryptoSuite collection - A unique digital collectible",
+  "image": "ipfs://QmExample1/6.png",
+  "attributes": [
+    {
+      "trait_type": "Rarity",
+      "value": "Uncommon"
+    },
+    {
+      "trait_type": "Background",
+      "value": "Orange"
+    },
+    {
+      "trait_type": "Edition",
+      "value": "Genesis"
+    }
+  ]
+}

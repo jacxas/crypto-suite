@@ -1,0 +1,19 @@
+{
+  "name": "CryptoSuite NFT #3",
+  "description": "Third NFT from the CryptoSuite collection - A unique digital collectible",
+  "image": "ipfs://QmExample1/3.png",
+  "attributes": [
+    {
+      "trait_type": "Rarity",
+      "value": "Rare"
+    },
+    {
+      "trait_type": "Background",
+      "value": "Purple"
+    },
+    {
+      "trait_type": "Edition",
+      "value": "Genesis"
+    }
+  ]
+}

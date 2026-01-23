@@ -1,0 +1,19 @@
+{
+  "name": "CryptoSuite NFT #9",
+  "description": "Ninth NFT from the CryptoSuite collection - A unique digital collectible",
+  "image": "ipfs://QmExample1/9.png",
+  "attributes": [
+    {
+      "trait_type": "Rarity",
+      "value": "Legendary"
+    },
+    {
+      "trait_type": "Background",
+      "value": "Diamond"
+    },
+    {
+      "trait_type": "Edition",
+      "value": "Genesis"
+    }
+  ]
+}
