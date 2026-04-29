@@ -52,15 +52,18 @@ function MiniChart({ data, positive }) {
 export default function Exchange() {
   const buildMarket = useCallback(
     () =>
-      TOKENS.map((t) => ({
+      TOKENS.map((t) => {
+        const price = t.basePrice * (0.95 + Math.random() * 0.1);
+        return {
         ...t,
-        price: t.basePrice * (0.95 + Math.random() * 0.1),
-        change24h: (Math.random() * 30 - 10).toFixed(2),
+        price,
+        change24h: (((price / t.basePrice) - 1) * 100).toFixed(2),
         volume24h: Math.floor(Math.random() * 10_000_000 + 1_000_000),
         high24h: t.basePrice * (1 + Math.random() * 0.15),
         low24h: t.basePrice * (1 - Math.random() * 0.15),
         chartData: generateChartData(),
-      })),
+      };
+      }),
     [],
   );
 
