@@ -1,18 +1,6 @@
 import { useState } from 'react';
 import TOKENS, { TOKEN_SERIES } from '../data/tokens';
-
-const SERIES_COLORS = {
-  A: { bg: 'bg-blue-500/20', text: 'text-blue-300', border: 'border-blue-500/30' },
-  A1: { bg: 'bg-purple-500/20', text: 'text-purple-300', border: 'border-purple-500/30' },
-  AX: { bg: 'bg-amber-500/20', text: 'text-amber-300', border: 'border-amber-500/30' },
-};
-
-const TYPE_ICONS = {
-  Governance: '\uD83C\uDFDB\uFE0F',
-  Utility: '\u2699\uFE0F',
-  Payment: '\uD83D\uDCB3',
-  Reserve: '\uD83C\uDFE6',
-};
+import { SERIES_COLORS, TYPE_ICONS } from '../data/constants';
 
 function Badge({ label, variant }) {
   const c = SERIES_COLORS[variant] || SERIES_COLORS.A;
@@ -101,11 +89,21 @@ export default function TokenSpecs() {
   const filtered =
     seriesFilter === 'ALL' ? TOKENS : TOKENS.filter((t) => t.series === seriesFilter);
 
+  function escapeCSV(value) {
+    const str = String(value);
+    if (str.includes(',') || str.includes('"') || str.includes('\n')) {
+      return '"' + str.replace(/"/g, '""') + '"';
+    }
+    return str;
+  }
+
   function handleCSV() {
     const header = 'Ticker,Nombre,Serie,Tipo,Supply,Arquitectura,Uso,Riesgos,Mitigaciones';
     const rows = TOKENS.map(
       (t) =>
-        `${t.ticker},"${t.name}",${t.series},${t.type},${t.supply},"${t.architecture}","${t.usage}","${t.risks}","${t.mitigations}"`,
+        [t.ticker, t.name, t.series, t.type, t.supply, t.architecture, t.usage, t.risks, t.mitigations]
+          .map(escapeCSV)
+          .join(','),
     );
     const blob = new Blob([header + '\n' + rows.join('\n')], { type: 'text/csv' });
     const url = URL.createObjectURL(blob);

@@ -72,7 +72,7 @@ export default function Exchange() {
         prev.map((t) => {
           const delta = (Math.random() - 0.48) * 0.04;
           const price = Math.max(0.01, t.price * (1 + delta));
-          const change = parseFloat(t.change24h) + delta * 100;
+          const change = ((price / t.basePrice) - 1) * 100;
           return {
             ...t,
             price,

@@ -1,11 +1,6 @@
 import TOKENS, { TOKEN_SERIES } from '../data/tokens';
+import { SERIES_BADGE_CLASSES } from '../data/constants';
 import { useState } from 'react';
-
-const SERIES_COLORS = {
-  A: 'bg-blue-500/20 text-blue-300',
-  A1: 'bg-purple-500/20 text-purple-300',
-  AX: 'bg-amber-500/20 text-amber-300',
-};
 
 export default function Gallery() {
   const [seriesFilter, setSeriesFilter] = useState('ALL');
@@ -57,7 +52,7 @@ export default function Gallery() {
               <div className="p-3">
                 <div className="flex items-center justify-between">
                   <p className="font-bold">{t.ticker}</p>
-                  <span className={`text-xs px-2 py-0.5 rounded ${SERIES_COLORS[t.series]}`}>
+                  <span className={`text-xs px-2 py-0.5 rounded ${SERIES_BADGE_CLASSES[t.series]}`}>
                     {t.series}
                   </span>
                 </div>
@@ -86,7 +81,7 @@ export default function Gallery() {
             <div className="p-6">
               <div className="flex items-center gap-3 mb-2">
                 <h2 className="text-2xl font-bold">{selectedToken.name}</h2>
-                <span className={`text-sm px-3 py-1 rounded ${SERIES_COLORS[selectedToken.series]}`}>
+                <span className={`text-sm px-3 py-1 rounded ${SERIES_BADGE_CLASSES[selectedToken.series]}`}>
                   {selectedToken.series}
                 </span>
               </div>
