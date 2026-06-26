@@ -101,6 +101,10 @@ contract TokenGatedBatchNFTSimple is ERC721, ERC721Enumerable, Ownable, Reentran
         emit NFTFed(tid, amt, a.power);
     }
     
+    // SEGURIDAD: el seed se deriva de block.timestamp/block.prevrandao, que son
+    // PSEUDO-aleatorios y predecibles/influenciables por validadores. Es aceptable
+    // solo para traits cosméticos de bajo valor. Para aleatoriedad resistente a
+    // manipulación (p.ej. rareza con valor económico) migrar a Chainlink VRF.
     function batchReveal() external onlyOwner {
         uint256 ur = _tokenIdCounter - revealedCount;
         require(ur >= revealBatchSize, "Not enough");
