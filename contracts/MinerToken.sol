@@ -305,8 +305,19 @@ contract MinerToken is ERC20, ERC20Burnable, Pausable, ReentrancyGuard, Ownable 
     /**
      * @dev Convierte reserva de gas a ETH nativo
      * @param amount Cantidad de tokens a convertir
+     * @param minAmountOut Mínimo de ETH a recibir (protección de slippage/MEV).
+     *                     El caller debe calcularlo off-chain a partir del
+     *                     precio esperado y su tolerancia de slippage.
+     * @param deadline Timestamp límite para ejecutar el swap
      */
-    function convertGasToNative(uint256 amount) external nonReentrant {
+    function convertGasToNative(
+        uint256 amount,
+        uint256 minAmountOut,
+        uint256 deadline
+    ) external nonReentrant {
+        require(minAmountOut > 0, "minAmountOut required");
+        require(deadline >= block.timestamp, "Deadline expired");
+
         MiningAttributes storage attrs = minerAttributes[msg.sender];
         require(attrs.gasReserve >= amount, "Insufficient gas reserve");
         
@@ -318,14 +329,14 @@ contract MinerToken is ERC20, ERC20Burnable, Pausable, ReentrancyGuard, Ownable 
         path[0] = address(this);
         path[1] = wrappedNative;
         
-        // Aprobar y ejecutar swap
+        // Aprobar y ejecutar swap con protección de slippage
         _approve(address(this), address(swapRouter), amount);
         swapRouter.swapExactTokensForETH(
             amount,
-            0, // Aceptar cualquier cantidad (en producción usar slippage)
+            minAmountOut,
             path,
             msg.sender,
-            block.timestamp + 300
+            deadline
         );
         
         emit GasUsed(msg.sender, amount, "convertToNative");
@@ -480,8 +491,11 @@ contract MinerToken is ERC20, ERC20Burnable, Pausable, ReentrancyGuard, Ownable 
         MiningAttributes memory attrs = minerAttributes[miner];
         if (attrs.activeProtocol == address(0)) return 0;
         
+        uint256 totalDeposited = supportedProtocols[attrs.activeProtocol].totalDeposited;
+        if (totalDeposited == 0) return 0;
+
         uint256 protocolRewards = IMiningProtocol(attrs.activeProtocol).pendingRewards(address(this));
-        uint256 userShare = (protocolRewards * attrs.stakedAmount) / supportedProtocols[attrs.activeProtocol].totalDeposited;
+        uint256 userShare = (protocolRewards * attrs.stakedAmount) / totalDeposited;
         
         // Aplicar bonuses
         uint256 powerBonus = (userShare * attrs.miningPower) / 100;

@@ -44,6 +44,7 @@ contract GasAccumulator is Ownable, ReentrancyGuard {
     }
     
     struct AutoTask {
+        address owner;             // Dueño/creador de la tarea (paga el gas)
         address target;            // Contrato objetivo
         bytes data;                // Calldata de la función
         uint256 gasLimit;          // Límite de gas
@@ -72,8 +73,12 @@ contract GasAccumulator is Ownable, ReentrancyGuard {
     uint256 public maxSlippage = 50;              // 0.5% slippage máximo
     
     // Estadísticas
-    uint256 public totalGasDistributed;
+    uint256 public totalGasDeposited;     // ETH total acreditado a cuentas
+    uint256 public totalGasDistributed;   // ETH total consumido en tareas
     uint256 public totalConversions;
+
+    // Flag para evitar que receive() acredite ETH durante un swap interno
+    bool private _swapping;
     
     // ============ EVENTOS ============
     
@@ -103,7 +108,7 @@ contract GasAccumulator is Ownable, ReentrancyGuard {
         gasAccounts[msg.sender].totalDeposited += msg.value;
         gasAccounts[msg.sender].lastTopUp = block.timestamp;
         
-        totalGasDistributed += msg.value;
+        totalGasDeposited += msg.value;
         
         emit GasDeposited(msg.sender, msg.value);
     }
@@ -131,7 +136,7 @@ contract GasAccumulator is Ownable, ReentrancyGuard {
         gasAccounts[msg.sender].totalDeposited += ethReceived;
         gasAccounts[msg.sender].lastTopUp = block.timestamp;
         
-        totalGasDistributed += ethReceived;
+        totalGasDeposited += ethReceived;
         totalConversions++;
         
         emit TokensConverted(token, amount, ethReceived);
@@ -156,6 +161,7 @@ contract GasAccumulator is Ownable, ReentrancyGuard {
         
         uint256 balanceBefore = address(this).balance;
         
+        _swapping = true;
         swapRouter.swapExactTokensForETH(
             amount,
             minOut,
@@ -163,6 +169,7 @@ contract GasAccumulator is Ownable, ReentrancyGuard {
             address(this),
             block.timestamp + 300
         );
+        _swapping = false;
         
         return address(this).balance - balanceBefore;
     }
@@ -205,6 +212,7 @@ contract GasAccumulator is Ownable, ReentrancyGuard {
         taskId = taskCount++;
         
         autoTasks[taskId] = AutoTask({
+            owner: msg.sender,
             target: target,
             data: data,
             gasLimit: gasLimit,
@@ -219,9 +227,13 @@ contract GasAccumulator is Ownable, ReentrancyGuard {
     /**
      * @dev Ejecuta una tarea automática (llamado por keeper/automation)
      * @param taskId ID de la tarea
-     * @param user Usuario dueño de la tarea
+     *
+     * El gas se descuenta SIEMPRE de la cuenta del dueño registrado de la
+     * tarea (`task.owner`), nunca de un usuario arbitrario pasado por quien
+     * llama. Esto evita que un atacante drene la cuenta de gas de otra
+     * persona ejecutando tareas contra ella.
      */
-    function executeAutoTask(uint256 taskId, address user) 
+    function executeAutoTask(uint256 taskId) 
         external 
         nonReentrant 
     {
@@ -232,28 +244,37 @@ contract GasAccumulator is Ownable, ReentrancyGuard {
             "Too early"
         );
         
-        // Verificar que el usuario tiene gas suficiente
-        uint256 estimatedCost = task.gasLimit * tx.gasprice;
-        require(gasAccounts[user].balance >= estimatedCost, "Insufficient gas");
+        address taskOwner = task.owner;
+        
+        // Verificar que el dueño de la tarea tiene gas suficiente
+        uint256 gasCost = task.gasLimit * tx.gasprice;
+        require(gasAccounts[taskOwner].balance >= gasCost, "Insufficient gas");
+        
+        // Descontar gas ANTES de la llamada externa (checks-effects-interactions)
+        gasAccounts[taskOwner].balance -= gasCost;
+        gasAccounts[taskOwner].totalUsed += gasCost;
+        totalGasDistributed += gasCost;
+        
+        // Actualizar timestamp antes de ejecutar para prevenir re-ejecución
+        task.lastExecution = block.timestamp;
         
         // Ejecutar la tarea
         (bool success, ) = task.target.call{gas: task.gasLimit}(task.data);
-        
-        // Descontar gas usado
-        uint256 gasUsed = task.gasLimit * tx.gasprice; // Simplificado
-        gasAccounts[user].balance -= gasUsed;
-        gasAccounts[user].totalUsed += gasUsed;
-        
-        task.lastExecution = block.timestamp;
         
         emit AutoTaskExecuted(taskId, success);
     }
     
     /**
-     * @dev Cancela una tarea automática
+     * @dev Cancela una tarea automática. Solo el dueño de la tarea o el
+     *      owner del contrato pueden cancelarla.
      */
     function cancelAutoTask(uint256 taskId) external {
-        autoTasks[taskId].isActive = false;
+        AutoTask storage task = autoTasks[taskId];
+        require(
+            msg.sender == task.owner || msg.sender == owner(),
+            "Not authorized"
+        );
+        task.isActive = false;
     }
     
     // ============ FUNCIONES DE TOP-UP AUTOMÁTICO ============
@@ -352,8 +373,15 @@ contract GasAccumulator is Ownable, ReentrancyGuard {
     // ============ RECIBIR ETH ============
     
     receive() external payable {
+        // Durante un swap interno el router envía ETH al contrato:
+        // ese ETH ya se contabiliza vía el diff de balance en _convertToETH,
+        // por lo que NO debe acreditarse aquí para evitar doble contabilización.
+        if (_swapping) {
+            return;
+        }
         // Permite recibir ETH directamente
         gasAccounts[msg.sender].balance += msg.value;
+        totalGasDeposited += msg.value;
         emit GasDeposited(msg.sender, msg.value);
     }
 }
