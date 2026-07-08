@@ -1,0 +1,86 @@
+name: Deploy to Sepolia
+
+# Solo se dispara de forma MANUAL desde la pestaña Actions
+# (workflow_dispatch) o cuando pusheás un tag con formato v*.*.*
+on:
+  workflow_dispatch:
+    inputs:
+      contract:
+        description: 'Contrato a deployar'
+        required: true
+        default: 'all'
+        type: choice
+        options:
+          - all
+          - AdvancedToken
+          - NFTCollection
+          - NFTMarketplace
+          - MinerToken
+          - CSUITEFaucet
+          - GasAccumulator
+      dry_run:
+        description: 'Dry run (solo simula, no deploya)'
+        required: false
+        default: false
+        type: boolean
+
+  push:
+    tags:
+      - 'v*.*.*'   # Ej: v1.0.0 → deploy automático a Sepolia
+
+jobs:
+  deploy:
+    name: Deploy Contracts → Sepolia
+    runs-on: ubuntu-latest
+    environment: sepolia   # Requiere aprobación manual si configurás "Required reviewers"
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Compile contracts
+        run: npm run compile
+
+      - name: Run tests before deploy
+        run: npm test
+
+      - name: Deploy to Sepolia
+        if: ${{ github.event.inputs.dry_run != 'true' }}
+        run: npm run deploy:sepolia
+        env:
+          SEPOLIA_RPC_URL: ${{ secrets.SEPOLIA_RPC_URL }}
+          PRIVATE_KEY: ${{ secrets.DEPLOYER_PRIVATE_KEY }}
+          ETHERSCAN_API_KEY: ${{ secrets.ETHERSCAN_API_KEY }}
+
+      - name: Dry run info
+        if: ${{ github.event.inputs.dry_run == 'true' }}
+        run: echo "DRY RUN — Deploy simulado correctamente. No se ejecutó ninguna tx."
+
+      - name: Verify contracts on Etherscan
+        if: ${{ github.event.inputs.dry_run != 'true' }}
+        run: |
+          echo "Verificando contratos en Etherscan..."
+          # Descomentar cuando tengas las addresses desplegadas:
+          # npx hardhat verify --network sepolia $CONTRACT_ADDRESS
+        env:
+          ETHERSCAN_API_KEY: ${{ secrets.ETHERSCAN_API_KEY }}
+        continue-on-error: true
+
+      - name: Upload deployment artifacts
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: deployment-${{ github.sha }}
+          path: |
+            artifacts/
+            deployments/
+          retention-days: 30
