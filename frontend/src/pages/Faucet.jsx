@@ -81,13 +81,19 @@ export default function Faucet() {
   const [countdown, setCountdown] = useState(0);
   const [copied, setCopied] = useState(false);
 
+  // wagmi v2: la condición de habilitado va dentro de `query.enabled`
+  const isReadEnabled =
+    isConnected &&
+    !!address &&
+    FAUCET_ADDRESS !== '0x0000000000000000000000000000000000000000';
+
   // Leer información del usuario
   const { data: userInfo } = useReadContract({
     address: FAUCET_ADDRESS,
     abi: FAUCET_ABI,
     functionName: 'getUserInfo',
     args: [address],
-    enabled: isConnected && FAUCET_ADDRESS !== '0x0000000000000000000000000000000000000000',
+    query: { enabled: isReadEnabled },
   });
 
   // Verificar si puede reclamar
@@ -96,7 +102,7 @@ export default function Faucet() {
     abi: FAUCET_ABI,
     functionName: 'canClaim',
     args: [address],
-    enabled: isConnected && FAUCET_ADDRESS !== '0x0000000000000000000000000000000000000000',
+    query: { enabled: isReadEnabled },
   });
 
   // Obtener cantidad a reclamar
@@ -105,7 +111,17 @@ export default function Faucet() {
     abi: FAUCET_ABI,
     functionName: 'getClaimAmount',
     args: [address],
-    enabled: isConnected && FAUCET_ADDRESS !== '0x0000000000000000000000000000000000000000',
+    query: { enabled: isReadEnabled },
+  });
+
+  // Leer el cooldown real del contrato (en segundos)
+  const { data: claimCooldown } = useReadContract({
+    address: FAUCET_ADDRESS,
+    abi: FAUCET_ABI,
+    functionName: 'claimCooldown',
+    query: {
+      enabled: FAUCET_ADDRESS !== '0x0000000000000000000000000000000000000000',
+    },
   });
 
   // Escribir contrato
@@ -142,11 +158,11 @@ export default function Faucet() {
     setTimeout(() => setCopied(false), 2000);
   };
 
-  // Countdown timer
+  // Countdown timer (usa el cooldown real del contrato, con fallback de 24h)
   useEffect(() => {
     if (userInfo && userInfo[1]) {
       const lastClaim = Number(userInfo[1]);
-      const cooldown = 24 * 60 * 60; // 24 horas
+      const cooldown = claimCooldown ? Number(claimCooldown) : 24 * 60 * 60;
       const nextClaim = lastClaim + cooldown;
       const now = Math.floor(Date.now() / 1000);
       
@@ -158,7 +174,7 @@ export default function Faucet() {
         return () => clearInterval(interval);
       }
     }
-  }, [userInfo]);
+  }, [userInfo, claimCooldown]);
 
   const formatCountdown = (seconds) => {
     const h = Math.floor(seconds / 3600);
