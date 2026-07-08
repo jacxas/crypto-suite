@@ -80,7 +80,7 @@ export default function Exchange() {
             ...t,
             price,
             change24h: change.toFixed(2),
-            volume24h: t.volume24h + Math.floor(Math.random() * 50000),
+            volume24h: Math.max(1_000_000, t.volume24h + Math.floor((Math.random() - 0.5) * 100000)),
             chartData: [...t.chartData.slice(1), 50 + change],
           };
         }),
