@@ -291,3 +291,7 @@ Cobertura completa incluyendo:
 ## 📄 Licencia
 
 MIT © [jacxas](https://github.com/jacxas)
+
+---
+
+Última actualización: 2026-09-13
