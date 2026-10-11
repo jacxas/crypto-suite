@@ -10,7 +10,9 @@
     "deploy": "node crypto-suite-complete.js deploy",
     "start": "node crypto-suite-complete.js start",
     "dev": "node --watch crypto-suite-complete.js start",
-    "test": "node crypto-suite-complete.js test"
+    "test": "node crypto-suite-complete.js test",
+    "build": "cd frontend && npm run build",
+    "build:frontend": "cd frontend && npm run build && cd .."
   },
   "dependencies": {
     "bcryptjs": "^2.4.3",
