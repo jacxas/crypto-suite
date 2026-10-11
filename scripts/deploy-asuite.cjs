@@ -33,6 +33,16 @@ async function main() {
 
   console.log("A-Suite - despliegue de los 10 tokens");
   console.log("Red:", chainId, "| Cuenta:", deployer.address);
+
+  if (chainId === "31337") {
+    console.log("");
+    console.log("AVISO: la red `hardhat` es EFIMERA.");
+    console.log("       Los contratos viven solo mientras corre este script,");
+    console.log("       asi que estas direcciones NO sirven despues.");
+    console.log("       Para un despliegue local que persista:");
+    console.log("         npx hardhat node   (en otra terminal)");
+    console.log("         npx hardhat run scripts/deploy-asuite.cjs --network localhost");
+  }
   console.log("");
 
   const direcciones = {};
