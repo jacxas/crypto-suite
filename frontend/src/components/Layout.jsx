@@ -1,10 +1,16 @@
 import { Outlet, NavLink } from 'react-router-dom';
 import { ConnectButton } from '@rainbow-me/rainbowkit';
-import { FiHome, FiLayers, FiImage, FiLock, FiUsers, FiDroplet, FiCheckSquare, FiDollarSign, FiActivity, FiUser } from 'react-icons/fi';
+import { FiHome, FiLayers, FiImage, FiLock, FiUsers, FiDroplet, FiCheckSquare, FiDollarSign, FiActivity, FiUser, FiTrendingUp, FiFileText, FiGrid, FiSend, FiGift } from 'react-icons/fi';
 import { GiHammer } from 'react-icons/gi';
 
 const navItems = [
   { path: '/', icon: FiHome, label: 'Dashboard' },
+  // A-Suite: la suite de 10 monedas
+  { path: '/exchange', icon: FiTrendingUp, label: 'A-Suite Exchange' },
+  { path: '/specs', icon: FiFileText, label: 'Token Specs' },
+  { path: '/gallery', icon: FiGrid, label: 'Galería' },
+  { path: '/token', icon: FiSend, label: 'Token' },
+  { path: '/faucet', icon: FiGift, label: 'Faucet' },
   { path: '/staking', icon: FiLayers, label: 'Staking' },
   { path: '/farming', icon: FiDroplet, label: 'Yield Farming' },
   { path: '/lending', icon: FiDollarSign, label: 'Préstamos' },

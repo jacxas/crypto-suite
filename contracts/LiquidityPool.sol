@@ -1,243 +1,268 @@
 // SPDX-License-Identifier: MIT
-pragma solidity ^0.8.0;
+pragma solidity ^0.8.20;
 
 import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
-import "@openzeppelin/contracts/token/ERC20/ERC20.sol";
-import "@openzeppelin/contracts/security/ReentrancyGuard.sol";
-import "@openzeppelin/contracts/security/Pausable.sol";
 import "@openzeppelin/contracts/access/Ownable.sol";
+import "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
 
 /**
  * @title LiquidityPool
- * @dev Yield Farming and Liquidity Pool contract with dynamic APY
+ * @dev Fabrica de pools de liquidez con swaps AMM y emision de recompensas.
+ * @notice Implementado segun test/contracts/LiquidityPool.test.cjs.
  */
-contract LiquidityPool is ERC20, ReentrancyGuard, Pausable, Ownable {
-    IERC20 public tokenA;
-    IERC20 public tokenB;
-    IERC20 public rewardToken;
-    
-    uint256 public totalLiquidity;
-    uint256 public rewardRate; // Rewards per second
-    uint256 public lastUpdateTime;
-    uint256 public rewardPerTokenStored;
+contract LiquidityPool is Ownable, ReentrancyGuard {
     uint256 public constant PRECISION = 1e18;
-    
-    // Fee configuration
-    uint256 public swapFee = 30; // 0.3%
-    uint256 public constant FEE_DENOMINATOR = 10000;
-    
-    // User info
-    struct UserInfo {
-        uint256 liquidityProvided;
+    uint256 public constant SWAP_FEE_BPS = 30; // 0.3%
+    uint256 public constant BPS_DENOMINATOR = 10000;
+
+    struct Pool {
+        address tokenA;
+        address tokenB;
+        uint256 reserveA;
+        uint256 reserveB;
+        uint256 totalLp;
+        uint256 rewardRate; // tokenA por bloque
+        uint256 totalFees;
+        uint256 lastRewardBlock;
+        uint256 accRewardPerLp;
+        bool exists;
+    }
+
+    struct UserPosition {
+        uint256 lpTokens;
         uint256 rewardDebt;
-        uint256 pendingRewards;
-        uint256 depositTime;
     }
-    
-    mapping(address => UserInfo) public userInfo;
-    mapping(address => uint256) public userRewardPerTokenPaid;
-    mapping(address => uint256) public rewards;
-    
-    // Events
-    event LiquidityAdded(address indexed user, uint256 amountA, uint256 amountB, uint256 liquidity);
-    event LiquidityRemoved(address indexed user, uint256 amountA, uint256 amountB, uint256 liquidity);
-    event Swap(address indexed user, address tokenIn, uint256 amountIn, uint256 amountOut);
-    event RewardsClaimed(address indexed user, uint256 amount);
-    event RewardRateUpdated(uint256 newRate);
-    event FeesCollected(uint256 amount);
-    
-    constructor(
-        address _tokenA,
-        address _tokenB,
-        address _rewardToken,
-        string memory _lpName,
-        string memory _lpSymbol
-    ) ERC20(_lpName, _lpSymbol) {
-        tokenA = IERC20(_tokenA);
-        tokenB = IERC20(_tokenB);
-        rewardToken = IERC20(_rewardToken);
-        rewardRate = 1e16; // Default: 0.01 tokens per second
+
+    mapping(uint256 => Pool) public pools;
+    mapping(uint256 => mapping(address => UserPosition)) public userPositions;
+    uint256 public poolCount;
+
+    event PoolCreated(uint256 indexed poolId, address indexed tokenA, address indexed tokenB, uint256 rewardRate);
+    event LiquidityAdded(uint256 indexed poolId, address indexed user, uint256 amountA, uint256 amountB, uint256 lpTokens);
+    event LiquidityRemoved(uint256 indexed poolId, address indexed user, uint256 amountA, uint256 amountB);
+    event Swap(uint256 indexed poolId, address indexed user, address tokenIn, uint256 amountIn, uint256 amountOut);
+    event RewardsClaimed(uint256 indexed poolId, address indexed user, uint256 amount);
+
+    constructor() Ownable(msg.sender) {}
+
+    // ==================== Pools ====================
+
+    function createPool(address tokenA, address tokenB, uint256 rewardRate) external returns (uint256) {
+        require(tokenA != address(0) && tokenB != address(0), "Invalid token");
+        require(tokenA != tokenB, "Identical tokens");
+
+        uint256 poolId = poolCount;
+        poolCount++;
+
+        Pool storage pool = pools[poolId];
+        pool.tokenA = tokenA;
+        pool.tokenB = tokenB;
+        pool.rewardRate = rewardRate;
+        pool.lastRewardBlock = block.number;
+        pool.exists = true;
+
+        emit PoolCreated(poolId, tokenA, tokenB, rewardRate);
+        return poolId;
     }
-    
-    // ============ Modifiers ============
-    
-    modifier updateReward(address account) {
-        rewardPerTokenStored = rewardPerToken();
-        lastUpdateTime = block.timestamp;
-        if (account != address(0)) {
-            rewards[account] = earned(account);
-            userRewardPerTokenPaid[account] = rewardPerTokenStored;
-        }
-        _;
-    }
-    
-    // ============ View Functions ============
-    
-    function rewardPerToken() public view returns (uint256) {
-        if (totalLiquidity == 0) {
-            return rewardPerTokenStored;
-        }
-        return rewardPerTokenStored + 
-            ((block.timestamp - lastUpdateTime) * rewardRate * PRECISION) / totalLiquidity;
-    }
-    
-    function earned(address account) public view returns (uint256) {
-        UserInfo storage user = userInfo[account];
-        return (user.liquidityProvided * (rewardPerToken() - userRewardPerTokenPaid[account])) / PRECISION + rewards[account];
-    }
-    
-    function getAPY() public view returns (uint256) {
-        if (totalLiquidity == 0) return 0;
-        // APY = (rewardRate * seconds_per_year * 100) / totalLiquidity
-        return (rewardRate * 31536000 * 100 * PRECISION) / totalLiquidity;
-    }
-    
-    function getReserves() public view returns (uint256 reserveA, uint256 reserveB) {
-        reserveA = tokenA.balanceOf(address(this));
-        reserveB = tokenB.balanceOf(address(this));
-    }
-    
-    function getAmountOut(uint256 amountIn, uint256 reserveIn, uint256 reserveOut) public view returns (uint256) {
-        require(amountIn > 0, "Insufficient input amount");
-        require(reserveIn > 0 && reserveOut > 0, "Insufficient liquidity");
-        
-        uint256 amountInWithFee = amountIn * (FEE_DENOMINATOR - swapFee);
-        uint256 numerator = amountInWithFee * reserveOut;
-        uint256 denominator = (reserveIn * FEE_DENOMINATOR) + amountInWithFee;
-        return numerator / denominator;
-    }
-    
-    // ============ Liquidity Functions ============
-    
+
+    // ==================== Liquidez ====================
+
     function addLiquidity(
+        uint256 poolId,
         uint256 amountA,
         uint256 amountB
-    ) external nonReentrant whenNotPaused updateReward(msg.sender) returns (uint256 liquidity) {
-        require(amountA > 0 && amountB > 0, "Amounts must be > 0");
-        
-        (uint256 reserveA, uint256 reserveB) = getReserves();
-        
-        // Transfer tokens
-        tokenA.transferFrom(msg.sender, address(this), amountA);
-        tokenB.transferFrom(msg.sender, address(this), amountB);
-        
-        // Calculate liquidity tokens to mint
-        if (totalLiquidity == 0) {
-            liquidity = sqrt(amountA * amountB);
+    ) external nonReentrant returns (uint256 lpTokens) {
+        Pool storage pool = pools[poolId];
+        require(pool.exists, "Pool not found");
+        require(amountA > 0 && amountB > 0, "Amount must be > 0");
+
+        _updatePool(poolId);
+
+        require(
+            IERC20(pool.tokenA).transferFrom(msg.sender, address(this), amountA),
+            "Transfer A failed"
+        );
+        require(
+            IERC20(pool.tokenB).transferFrom(msg.sender, address(this), amountB),
+            "Transfer B failed"
+        );
+
+        if (pool.totalLp == 0) {
+            lpTokens = _sqrt(amountA * amountB);
         } else {
-            liquidity = min(
-                (amountA * totalSupply()) / reserveA,
-                (amountB * totalSupply()) / reserveB
-            );
+            uint256 lpA = (amountA * pool.totalLp) / pool.reserveA;
+            uint256 lpB = (amountB * pool.totalLp) / pool.reserveB;
+            lpTokens = lpA < lpB ? lpA : lpB;
         }
-        
-        require(liquidity > 0, "Insufficient liquidity minted");
-        
-        // Update state
-        _mint(msg.sender, liquidity);
-        totalLiquidity += liquidity;
-        userInfo[msg.sender].liquidityProvided += liquidity;
-        userInfo[msg.sender].depositTime = block.timestamp;
-        
-        emit LiquidityAdded(msg.sender, amountA, amountB, liquidity);
+        require(lpTokens > 0, "Insufficient liquidity minted");
+
+        pool.reserveA += amountA;
+        pool.reserveB += amountB;
+        pool.totalLp += lpTokens;
+
+        UserPosition storage position = userPositions[poolId][msg.sender];
+        position.lpTokens += lpTokens;
+        position.rewardDebt = (position.lpTokens * pool.accRewardPerLp) / PRECISION;
+
+        emit LiquidityAdded(poolId, msg.sender, amountA, amountB, lpTokens);
     }
-    
-    function removeLiquidity(
-        uint256 liquidity
-    ) external nonReentrant updateReward(msg.sender) returns (uint256 amountA, uint256 amountB) {
-        require(liquidity > 0, "Liquidity must be > 0");
-        require(balanceOf(msg.sender) >= liquidity, "Insufficient LP tokens");
-        
-        (uint256 reserveA, uint256 reserveB) = getReserves();
-        uint256 totalSupplyLP = totalSupply();
-        
-        // Calculate amounts to return
-        amountA = (liquidity * reserveA) / totalSupplyLP;
-        amountB = (liquidity * reserveB) / totalSupplyLP;
-        
-        require(amountA > 0 && amountB > 0, "Insufficient liquidity burned");
-        
-        // Update state
-        _burn(msg.sender, liquidity);
-        totalLiquidity -= liquidity;
-        userInfo[msg.sender].liquidityProvided -= liquidity;
-        
-        // Transfer tokens back
-        tokenA.transfer(msg.sender, amountA);
-        tokenB.transfer(msg.sender, amountB);
-        
-        emit LiquidityRemoved(msg.sender, amountA, amountB, liquidity);
+
+    function removeLiquidity(uint256 poolId, uint256 lpTokens) external nonReentrant {
+        Pool storage pool = pools[poolId];
+        require(pool.exists, "Pool not found");
+        require(lpTokens > 0, "Amount must be > 0");
+
+        UserPosition storage position = userPositions[poolId][msg.sender];
+        require(position.lpTokens >= lpTokens, "Insufficient LP tokens");
+
+        _updatePool(poolId);
+
+        uint256 amountA = (lpTokens * pool.reserveA) / pool.totalLp;
+        uint256 amountB = (lpTokens * pool.reserveB) / pool.totalLp;
+
+        position.lpTokens -= lpTokens;
+        position.rewardDebt = (position.lpTokens * pool.accRewardPerLp) / PRECISION;
+        pool.totalLp -= lpTokens;
+        pool.reserveA -= amountA;
+        pool.reserveB -= amountB;
+
+        require(IERC20(pool.tokenA).transfer(msg.sender, amountA), "Transfer A failed");
+        require(IERC20(pool.tokenB).transfer(msg.sender, amountB), "Transfer B failed");
+
+        emit LiquidityRemoved(poolId, msg.sender, amountA, amountB);
     }
-    
-    // ============ Swap Functions ============
-    
-    function swapAForB(uint256 amountIn) external nonReentrant whenNotPaused returns (uint256 amountOut) {
+
+    // ==================== Swaps ====================
+
+    function swap(
+        uint256 poolId,
+        address tokenIn,
+        uint256 amountIn,
+        uint256 minAmountOut
+    ) external nonReentrant returns (uint256 amountOut) {
+        Pool storage pool = pools[poolId];
+        require(pool.exists, "Pool not found");
         require(amountIn > 0, "Amount must be > 0");
-        
-        (uint256 reserveA, uint256 reserveB) = getReserves();
-        amountOut = getAmountOut(amountIn, reserveA, reserveB);
-        
-        tokenA.transferFrom(msg.sender, address(this), amountIn);
-        tokenB.transfer(msg.sender, amountOut);
-        
-        emit Swap(msg.sender, address(tokenA), amountIn, amountOut);
+
+        bool isA = tokenIn == pool.tokenA;
+        require(isA || tokenIn == pool.tokenB, "Invalid token");
+
+        uint256 fee = (amountIn * SWAP_FEE_BPS) / BPS_DENOMINATOR;
+        uint256 amountInAfterFee = amountIn - fee;
+
+        uint256 reserveIn = isA ? pool.reserveA : pool.reserveB;
+        uint256 reserveOut = isA ? pool.reserveB : pool.reserveA;
+
+        require(reserveIn > 0 && reserveOut > 0, "Empty pool");
+
+        amountOut = (reserveOut * amountInAfterFee) / (reserveIn + amountInAfterFee);
+        require(amountOut >= minAmountOut, "Slippage exceeded");
+        require(amountOut < reserveOut, "Insufficient liquidity");
+
+        // El vendedor paga el importe completo; la comision engrosa las reservas.
+        require(IERC20(tokenIn).transferFrom(msg.sender, address(this), amountIn), "Transfer in failed");
+
+        address tokenOut = isA ? pool.tokenB : pool.tokenA;
+        require(IERC20(tokenOut).transfer(msg.sender, amountOut), "Transfer out failed");
+
+        if (isA) {
+            pool.reserveA += amountIn;
+            pool.reserveB -= amountOut;
+        } else {
+            pool.reserveB += amountIn;
+            pool.reserveA -= amountOut;
+        }
+
+        pool.totalFees += fee;
+        _updatePool(poolId);
+
+        emit Swap(poolId, msg.sender, tokenIn, amountIn, amountOut);
     }
-    
-    function swapBForA(uint256 amountIn) external nonReentrant whenNotPaused returns (uint256 amountOut) {
-        require(amountIn > 0, "Amount must be > 0");
-        
-        (uint256 reserveA, uint256 reserveB) = getReserves();
-        amountOut = getAmountOut(amountIn, reserveB, reserveA);
-        
-        tokenB.transferFrom(msg.sender, address(this), amountIn);
-        tokenA.transfer(msg.sender, amountOut);
-        
-        emit Swap(msg.sender, address(tokenB), amountIn, amountOut);
+
+    // ==================== Recompensas ====================
+
+    function _updatePool(uint256 poolId) internal {
+        Pool storage pool = pools[poolId];
+        if (pool.totalLp == 0) {
+            pool.lastRewardBlock = block.number;
+            return;
+        }
+        uint256 blocksElapsed = block.number - pool.lastRewardBlock;
+        if (blocksElapsed > 0) {
+            uint256 accrued = blocksElapsed * pool.rewardRate;
+            pool.accRewardPerLp += (accrued * PRECISION) / pool.totalLp;
+            pool.lastRewardBlock = block.number;
+        }
     }
-    
-    // ============ Reward Functions ============
-    
-    function claimRewards() external nonReentrant updateReward(msg.sender) {
-        uint256 reward = rewards[msg.sender];
-        require(reward > 0, "No rewards to claim");
-        
-        rewards[msg.sender] = 0;
-        rewardToken.transfer(msg.sender, reward);
-        
-        emit RewardsClaimed(msg.sender, reward);
+
+    /// @notice Recompensas devengadas por un usuario (devengo bruto, sin topar).
+    function pendingRewards(uint256 poolId, address user) external view returns (uint256) {
+        Pool storage pool = pools[poolId];
+        if (pool.totalLp == 0) return 0;
+
+        UserPosition storage position = userPositions[poolId][user];
+        uint256 acc = pool.accRewardPerLp;
+        uint256 blocksElapsed = block.number - pool.lastRewardBlock;
+        if (blocksElapsed > 0) {
+            acc += (blocksElapsed * pool.rewardRate * PRECISION) / pool.totalLp;
+        }
+
+        uint256 gross = (position.lpTokens * acc) / PRECISION;
+        if (gross <= position.rewardDebt) return 0;
+        return gross - position.rewardDebt;
     }
-    
-    // ============ Admin Functions ============
-    
-    function setRewardRate(uint256 _rewardRate) external onlyOwner updateReward(address(0)) {
-        rewardRate = _rewardRate;
-        emit RewardRateUpdated(_rewardRate);
+
+    /// @notice Cobra las recompensas acumuladas.
+    /// @dev El pago sale del excedente del pool (comisiones), nunca de las
+    ///      reservas que respaldan los LP tokens.
+    function claimRewards(uint256 poolId) external nonReentrant returns (uint256 paid) {
+        Pool storage pool = pools[poolId];
+        require(pool.exists, "Pool not found");
+
+        _updatePool(poolId);
+
+        UserPosition storage position = userPositions[poolId][msg.sender];
+        uint256 gross = (position.lpTokens * pool.accRewardPerLp) / PRECISION;
+        uint256 owed = gross > position.rewardDebt ? gross - position.rewardDebt : 0;
+
+        if (owed > 0) {
+            uint256 surplus = _rewardSurplus(poolId);
+            paid = owed < surplus ? owed : surplus;
+            if (paid > 0) {
+                require(IERC20(pool.tokenA).transfer(msg.sender, paid), "Reward transfer failed");
+            }
+        }
+
+        // La parte no pagada (sin excedente suficiente) queda pendiente para
+        // otra reclamacion: solo se descuenta lo que realmente se ha pagado.
+        position.rewardDebt = gross - (owed - paid);
+
+        emit RewardsClaimed(poolId, msg.sender, paid);
     }
-    
-    function setSwapFee(uint256 _swapFee) external onlyOwner {
-        require(_swapFee <= 1000, "Fee too high"); // Max 10%
-        swapFee = _swapFee;
+
+    /// @dev tokenA disponible por encima de la reserva de liquidez.
+    function _rewardSurplus(uint256 poolId) internal view returns (uint256) {
+        Pool storage pool = pools[poolId];
+        uint256 balance = IERC20(pool.tokenA).balanceOf(address(this));
+        if (balance <= pool.reserveA) return 0;
+        return balance - pool.reserveA;
     }
-    
-    function depositRewards(uint256 amount) external onlyOwner {
-        rewardToken.transferFrom(msg.sender, address(this), amount);
+
+    // ==================== Vistas y administracion ====================
+
+    function getReserves(uint256 poolId) external view returns (uint256 reserveA, uint256 reserveB) {
+        Pool storage pool = pools[poolId];
+        return (pool.reserveA, pool.reserveB);
     }
-    
-    function pause() external onlyOwner {
-        _pause();
+
+    function setRewardRate(uint256 poolId, uint256 newRate) external onlyOwner {
+        Pool storage pool = pools[poolId];
+        require(pool.exists, "Pool not found");
+        _updatePool(poolId);
+        pool.rewardRate = newRate;
     }
-    
-    function unpause() external onlyOwner {
-        _unpause();
-    }
-    
-    function emergencyWithdraw(address token, uint256 amount) external onlyOwner {
-        IERC20(token).transfer(owner(), amount);
-    }
-    
-    // ============ Helper Functions ============
-    
-    function sqrt(uint256 y) internal pure returns (uint256 z) {
+
+    function _sqrt(uint256 y) internal pure returns (uint256 z) {
         if (y > 3) {
             z = y;
             uint256 x = y / 2 + 1;
@@ -248,9 +273,5 @@ contract LiquidityPool is ERC20, ReentrancyGuard, Pausable, Ownable {
         } else if (y != 0) {
             z = 1;
         }
-    }
-    
-    function min(uint256 a, uint256 b) internal pure returns (uint256) {
-        return a < b ? a : b;
     }
 }

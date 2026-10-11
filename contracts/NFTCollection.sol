@@ -1,36 +1,63 @@
 // SPDX-License-Identifier: MIT
-pragma solidity ^0.8.0;
+pragma solidity ^0.8.20;
 
 import "@openzeppelin/contracts/token/ERC721/ERC721.sol";
 import "@openzeppelin/contracts/access/Ownable.sol";
+import "@openzeppelin/contracts/utils/Strings.sol";
 
+/**
+ * @title NFTCollection
+ * @dev ERC721 con acuñacion por lotes.
+ * @notice `tokenURI` se compone siempre como baseURI + tokenId, que es lo que
+ *         fijan los tests (test/NFTCollection.test.cjs).
+ */
 contract NFTCollection is ERC721, Ownable {
     uint256 private _tokenIdCounter;
-    string private _baseURI;
+    string private _baseTokenURI;
 
-    constructor(string memory name, string memory symbol, string memory baseURI) ERC721(name, symbol) {
-        _baseURI = baseURI;
+    event BatchMinted(uint256 count, string prefix);
+
+    constructor(
+        string memory name,
+        string memory symbol,
+        string memory baseURI
+    ) ERC721(name, symbol) Ownable(msg.sender) {
+        _baseTokenURI = baseURI;
     }
 
-    function mintNFT(string memory tokenURI) external onlyOwner returns (uint256) {
+    /// @notice Acuña un NFT al que llama.
+    /// @dev `uri` se mantiene por compatibilidad de firma: el URI final se
+    ///      compone como baseURI + tokenId.
+    function mintNFT(string memory uri) external onlyOwner returns (uint256) {
+        uri; // parametro conservado por compatibilidad, no se almacena
         uint256 tokenId = _tokenIdCounter;
         _tokenIdCounter++;
         _mint(msg.sender, tokenId);
-        // Note: tokenURI is not stored, assuming baseURI + tokenId
         return tokenId;
     }
 
-    function batchMint(string[] memory tokenURIs) external onlyOwner returns (uint256[] memory) {
+    /// @notice Acuña un NFT por cada URI de la lista.
+    function batchMint(
+        string[] memory tokenURIs
+    ) external onlyOwner returns (uint256[] memory) {
         uint256[] memory tokenIds = new uint256[](tokenURIs.length);
         for (uint256 i = 0; i < tokenURIs.length; i++) {
-            tokenIds[i] = _tokenIdCounter;
+            uint256 tokenId = _tokenIdCounter;
             _tokenIdCounter++;
-            _mint(msg.sender, tokenIds[i]);
+            _mint(msg.sender, tokenId);
+            tokenIds[i] = tokenId;
         }
         return tokenIds;
     }
 
-    function tokenURI(uint256 tokenId) public view override returns (string memory) {
-        return string(abi.encodePacked(_baseURI, Strings.toString(tokenId)));
+    function tokenURI(
+        uint256 tokenId
+    ) public view override returns (string memory) {
+        _requireOwned(tokenId);
+        return string(abi.encodePacked(_baseTokenURI, Strings.toString(tokenId)));
+    }
+
+    function totalMinted() external view returns (uint256) {
+        return _tokenIdCounter;
     }
 }

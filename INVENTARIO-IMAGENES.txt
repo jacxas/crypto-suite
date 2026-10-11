@@ -1,0 +1,38 @@
+INVENTARIO DE IMAGENES - crypto-suite
+==============================================================================
+Comprueba que GitHub tiene lo mismo: descarga el repo aparte y compara.
+
+        bytes  hash(16)          ruta
+------------------------------------------------------------------------------
+       105171  ad36e940a09fa1d2  _backup-2026-10-11/assets/tokens/token-1.jpg
+       118694  6491132be29d5d2c  _backup-2026-10-11/assets/tokens/token-10.jpg
+       111465  717b2bb261fbc7c5  _backup-2026-10-11/assets/tokens/token-2.jpg
+       130799  d2b88749389e108d  _backup-2026-10-11/assets/tokens/token-3.jpg
+       120916  3103f1a6a2f483d1  _backup-2026-10-11/assets/tokens/token-4.jpg
+        98644  73eb1ebff00b237b  _backup-2026-10-11/assets/tokens/token-5.jpg
+       128337  ae3a93e427293bf6  _backup-2026-10-11/assets/tokens/token-6.jpg
+        85729  0e2e7a536f0f9b37  _backup-2026-10-11/assets/tokens/token-7.jpg
+       129880  450b3be11575252c  _backup-2026-10-11/assets/tokens/token-8.jpg
+       120500  789166909d2f02f9  _backup-2026-10-11/assets/tokens/token-9.jpg
+       105171  ad36e940a09fa1d2  assets/tokens/token-1.jpg
+       118694  6491132be29d5d2c  assets/tokens/token-10.jpg
+       111465  717b2bb261fbc7c5  assets/tokens/token-2.jpg
+       130799  d2b88749389e108d  assets/tokens/token-3.jpg
+       120916  3103f1a6a2f483d1  assets/tokens/token-4.jpg
+        98644  73eb1ebff00b237b  assets/tokens/token-5.jpg
+       128337  ae3a93e427293bf6  assets/tokens/token-6.jpg
+        85729  0e2e7a536f0f9b37  assets/tokens/token-7.jpg
+       129880  450b3be11575252c  assets/tokens/token-8.jpg
+       120500  789166909d2f02f9  assets/tokens/token-9.jpg
+      2257004  cf191738afb52046  frontend/public/tokens/a1gov.jpg
+      2544118  125427fb0337dc7a  frontend/public/tokens/a1pay.jpg
+      2315733  8cfea3135f466391  frontend/public/tokens/a1uti.jpg
+      2027054  68592547dd6832f8  frontend/public/tokens/agov.jpg
+      1928939  d01defa1dca6adb2  frontend/public/tokens/apay.jpg
+      1542443  3f40e2a02ed07215  frontend/public/tokens/ares.jpg
+      2632796  f74e06e8f7e8b8fa  frontend/public/tokens/auti.jpg
+      2525797  4a7744f1d387cc06  frontend/public/tokens/axgov.jpg
+      2698281  5c9e943e9d0e476c  frontend/public/tokens/axpay.jpg
+      1878752  bc3821a91093b123  frontend/public/tokens/axres.jpg
+------------------------------------------------------------------------------
+TOTAL: 30 imagenes, 23.51 MB

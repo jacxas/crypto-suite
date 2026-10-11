@@ -12,6 +12,12 @@ import Lending from './pages/Lending';
 import NFTAuctions from './pages/NFTAuctions';
 import Analytics from './pages/Analytics';
 import Profile from './pages/Profile';
+// --- A-Suite (suite de 10 monedas) ---
+import Exchange from './pages/Exchange';
+import TokenSpecs from './pages/TokenSpecs';
+import Gallery from './pages/Gallery';
+import Token from './pages/Token';
+import Faucet from './pages/Faucet';
 
 function App() {
   return (
@@ -39,6 +45,12 @@ function App() {
           <Route path="auctions" element={<NFTAuctions />} />
           <Route path="analytics" element={<Analytics />} />
           <Route path="profile" element={<Profile />} />
+          {/* A-Suite: suite de 10 monedas */}
+          <Route path="exchange" element={<Exchange />} />
+          <Route path="specs" element={<TokenSpecs />} />
+          <Route path="gallery" element={<Gallery />} />
+          <Route path="token" element={<Token />} />
+          <Route path="faucet" element={<Faucet />} />
         </Route>
       </Routes>
     </>

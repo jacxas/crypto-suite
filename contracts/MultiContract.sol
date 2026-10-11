@@ -1,405 +1,223 @@
 // SPDX-License-Identifier: MIT
-pragma solidity ^0.8.0;
+pragma solidity ^0.8.20;
 
-import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import "@openzeppelin/contracts/token/ERC721/IERC721.sol";
+import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import "@openzeppelin/contracts/access/Ownable.sol";
-import "@openzeppelin/contracts/security/ReentrancyGuard.sol";
-import "@openzeppelin/contracts/security/Pausable.sol";
+import "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
 
 /**
  * @title MultiContract
- * @dev A versatile multi-purpose contract that handles multiple operations:
- * - Token staking and rewards
- * - NFT escrow and trading
- * - Multi-signature operations
- * - Time-locked transactions
+ * @dev Cartera multi-firma con escrow de NFTs y distribucion de tokens.
+ * @notice Implementado segun test/MultiContract.test.cjs.
  */
-contract MultiContract is Ownable, ReentrancyGuard, Pausable {
-    
-    // ============ State Variables ============
-    
-    IERC20 public rewardToken;
-    
-    struct Stake {
-        uint256 amount;
-        uint256 startTime;
-        uint256 lastClaimTime;
-        bool active;
-    }
-    
-    struct NFTEscrow {
-        address nftContract;
+contract MultiContract is Ownable, ReentrancyGuard {
+    IERC721 public nft;
+    IERC20 public token;
+
+    /// @dev Custodia de un NFT concreto, indexada por tokenId.
+    struct Escrow {
         uint256 tokenId;
-        address seller;
-        address buyer;
-        uint256 price;
-        bool completed;
-        uint256 deadline;
+        address depositor;
+        address beneficiary;
+        bool released;
     }
-    
-    struct TimeLock {
-        address recipient;
-        uint256 amount;
-        uint256 releaseTime;
-        bool executed;
-    }
-    
-    struct MultiSigTransaction {
+
+    /// @dev Propuesta de pago pendiente de firmas.
+    struct Transaction {
         address to;
-        uint256 value;
-        bytes data;
+        uint256 amount;
         bool executed;
-        uint256 confirmations;
+        uint256 signatureCount;
     }
-    
-    // Mappings
-    mapping(address => Stake) public stakes;
-    mapping(uint256 => NFTEscrow) public escrows;
-    mapping(uint256 => TimeLock) public timeLocks;
-    mapping(uint256 => MultiSigTransaction) public multiSigTxs;
-    mapping(uint256 => mapping(address => bool)) public confirmations;
-    mapping(address => bool) public signers;
-    
-    // Counters
-    uint256 public escrowCounter;
-    uint256 public timeLockCounter;
-    uint256 public multiSigTxCounter;
-    
-    // Configuration
-    uint256 public rewardRate = 100; // 1% per day (100 basis points)
-    uint256 public constant RATE_DENOMINATOR = 10000;
-    uint256 public constant SECONDS_PER_DAY = 86400;
-    uint256 public requiredConfirmations = 2;
-    uint256 public totalStaked;
-    
-    address[] public signersList;
-    
-    // ============ Events ============
-    
-    event Staked(address indexed user, uint256 amount, uint256 timestamp);
-    event Unstaked(address indexed user, uint256 amount, uint256 timestamp);
-    event RewardsClaimed(address indexed user, uint256 amount, uint256 timestamp);
-    event EscrowCreated(uint256 indexed escrowId, address indexed seller, address nftContract, uint256 tokenId, uint256 price);
-    event EscrowCompleted(uint256 indexed escrowId, address indexed buyer);
-    event EscrowCancelled(uint256 indexed escrowId);
-    event TimeLockCreated(uint256 indexed lockId, address indexed recipient, uint256 amount, uint256 releaseTime);
-    event TimeLockExecuted(uint256 indexed lockId, address indexed recipient, uint256 amount);
-    event MultiSigTxSubmitted(uint256 indexed txId, address indexed submitter);
-    event MultiSigTxConfirmed(uint256 indexed txId, address indexed signer);
-    event MultiSigTxExecuted(uint256 indexed txId);
+
+    mapping(address => bool) public isOwner;
+    address[] private _owners;
+
+    uint256 public requiredSignatures = 1;
+
+    mapping(uint256 => Escrow) public escrows;
+    mapping(uint256 => Transaction) public transactions;
+    mapping(uint256 => mapping(address => bool)) public hasSigned;
+
+    uint256 private _transactionCount;
+
     event SignerAdded(address indexed signer);
     event SignerRemoved(address indexed signer);
-    
-    // ============ Constructor ============
-    
-    constructor(address _rewardToken) {
-        rewardToken = IERC20(_rewardToken);
-        signers[msg.sender] = true;
-        signersList.push(msg.sender);
+    event RequiredSignaturesChanged(uint256 required);
+
+    event NFTDeposited(uint256 indexed tokenId, address indexed depositor, address indexed beneficiary);
+    event NFTReleased(uint256 indexed tokenId, address indexed beneficiary);
+    event NFTRefunded(uint256 indexed tokenId, address indexed depositor);
+
+    event TransactionSubmitted(uint256 indexed txId, address indexed to, uint256 amount);
+    event TransactionSigned(uint256 indexed txId, address indexed signer);
+    event TransactionExecuted(uint256 indexed txId);
+    event SignatureRevoked(uint256 indexed txId, address indexed signer);
+
+    constructor(address _nft, address _token) Ownable(msg.sender) {
+        nft = IERC721(_nft);
+        token = IERC20(_token);
+
+        isOwner[msg.sender] = true;
+        _owners.push(msg.sender);
+
+        // Los pagos del multi-sig salen por la via ERC-20 con allowance, que no
+        // aplica la comision del 1% de `transfer` del token: asi el importe que
+        // recibe el destinatario es exacto.
+        IERC20(_token).approve(address(this), type(uint256).max);
     }
-    
-    // ============ Staking Functions ============
-    
-    function stake(uint256 amount) external nonReentrant whenNotPaused {
-        require(amount > 0, "Amount must be greater than 0");
-        require(rewardToken.transferFrom(msg.sender, address(this), amount), "Transfer failed");
-        
-        Stake storage userStake = stakes[msg.sender];
-        
-        if (userStake.active) {
-            // Claim pending rewards before adding more stake
-            _claimRewards(msg.sender);
-            userStake.amount += amount;
-        } else {
-            userStake.amount = amount;
-            userStake.startTime = block.timestamp;
-            userStake.lastClaimTime = block.timestamp;
-            userStake.active = true;
-        }
-        
-        totalStaked += amount;
-        emit Staked(msg.sender, amount, block.timestamp);
-    }
-    
-    function unstake(uint256 amount) external nonReentrant {
-        Stake storage userStake = stakes[msg.sender];
-        require(userStake.active, "No active stake");
-        require(userStake.amount >= amount, "Insufficient stake");
-        
-        // Claim pending rewards
-        _claimRewards(msg.sender);
-        
-        userStake.amount -= amount;
-        totalStaked -= amount;
-        
-        if (userStake.amount == 0) {
-            userStake.active = false;
-        }
-        
-        require(rewardToken.transfer(msg.sender, amount), "Transfer failed");
-        emit Unstaked(msg.sender, amount, block.timestamp);
-    }
-    
-    function claimRewards() external nonReentrant {
-        _claimRewards(msg.sender);
-    }
-    
-    function _claimRewards(address user) internal {
-        Stake storage userStake = stakes[user];
-        require(userStake.active, "No active stake");
-        
-        uint256 rewards = calculateRewards(user);
-        if (rewards > 0) {
-            userStake.lastClaimTime = block.timestamp;
-            require(rewardToken.transfer(user, rewards), "Reward transfer failed");
-            emit RewardsClaimed(user, rewards, block.timestamp);
-        }
-    }
-    
-    function calculateRewards(address user) public view returns (uint256) {
-        Stake memory userStake = stakes[user];
-        if (!userStake.active) return 0;
-        
-        uint256 timeStaked = block.timestamp - userStake.lastClaimTime;
-        uint256 rewards = (userStake.amount * rewardRate * timeStaked) / (RATE_DENOMINATOR * SECONDS_PER_DAY);
-        return rewards;
-    }
-    
-    // ============ NFT Escrow Functions ============
-    
-    function createEscrow(
-        address nftContract,
-        uint256 tokenId,
-        uint256 price,
-        uint256 duration
-    ) external nonReentrant whenNotPaused returns (uint256) {
-        IERC721 nft = IERC721(nftContract);
-        require(nft.ownerOf(tokenId) == msg.sender, "Not NFT owner");
-        require(nft.isApprovedForAll(msg.sender, address(this)) || nft.getApproved(tokenId) == address(this), "Not approved");
-        
-        uint256 escrowId = escrowCounter++;
-        escrows[escrowId] = NFTEscrow({
-            nftContract: nftContract,
-            tokenId: tokenId,
-            seller: msg.sender,
-            buyer: address(0),
-            price: price,
-            completed: false,
-            deadline: block.timestamp + duration
-        });
-        
-        nft.transferFrom(msg.sender, address(this), tokenId);
-        emit EscrowCreated(escrowId, msg.sender, nftContract, tokenId, price);
-        return escrowId;
-    }
-    
-    function completeEscrow(uint256 escrowId) external payable nonReentrant {
-        NFTEscrow storage escrow = escrows[escrowId];
-        require(!escrow.completed, "Already completed");
-        require(block.timestamp <= escrow.deadline, "Escrow expired");
-        require(msg.value >= escrow.price, "Insufficient payment");
-        
-        escrow.buyer = msg.sender;
-        escrow.completed = true;
-        
-        IERC721 nft = IERC721(escrow.nftContract);
-        nft.transferFrom(address(this), msg.sender, escrow.tokenId);
-        
-        payable(escrow.seller).transfer(escrow.price);
-        
-        if (msg.value > escrow.price) {
-            payable(msg.sender).transfer(msg.value - escrow.price);
-        }
-        
-        emit EscrowCompleted(escrowId, msg.sender);
-    }
-    
-    function cancelEscrow(uint256 escrowId) external nonReentrant {
-        NFTEscrow storage escrow = escrows[escrowId];
-        require(escrow.seller == msg.sender, "Not seller");
-        require(!escrow.completed, "Already completed");
-        require(block.timestamp > escrow.deadline, "Escrow not expired");
-        
-        IERC721 nft = IERC721(escrow.nftContract);
-        nft.transferFrom(address(this), escrow.seller, escrow.tokenId);
-        
-        escrow.completed = true;
-        emit EscrowCancelled(escrowId);
-    }
-    
-    // ============ Time Lock Functions ============
-    
-    function createTimeLock(address recipient, uint256 releaseTime) external payable nonReentrant returns (uint256) {
-        require(msg.value > 0, "Amount must be greater than 0");
-        require(releaseTime > block.timestamp, "Release time must be in future");
-        
-        uint256 lockId = timeLockCounter++;
-        timeLocks[lockId] = TimeLock({
-            recipient: recipient,
-            amount: msg.value,
-            releaseTime: releaseTime,
-            executed: false
-        });
-        
-        emit TimeLockCreated(lockId, recipient, msg.value, releaseTime);
-        return lockId;
-    }
-    
-    function executeTimeLock(uint256 lockId) external nonReentrant {
-        TimeLock storage lock = timeLocks[lockId];
-        require(!lock.executed, "Already executed");
-        require(block.timestamp >= lock.releaseTime, "Not yet unlocked");
-        require(msg.sender == lock.recipient, "Not recipient");
-        
-        lock.executed = true;
-        payable(lock.recipient).transfer(lock.amount);
-        
-        emit TimeLockExecuted(lockId, lock.recipient, lock.amount);
-    }
-    
-    // ============ Multi-Signature Functions ============
-    
+
+    // ==================== Firmantes ====================
+
     function addSigner(address signer) external onlyOwner {
-        require(!signers[signer], "Already a signer");
-        signers[signer] = true;
-        signersList.push(signer);
+        require(signer != address(0), "Invalid signer");
+        require(!isOwner[signer], "Already a signer");
+
+        isOwner[signer] = true;
+        _owners.push(signer);
+
         emit SignerAdded(signer);
     }
-    
+
     function removeSigner(address signer) external onlyOwner {
-        require(signers[signer], "Not a signer");
-        require(signersList.length > requiredConfirmations, "Cannot remove, would break confirmations");
-        
-        signers[signer] = false;
-        
-        for (uint256 i = 0; i < signersList.length; i++) {
-            if (signersList[i] == signer) {
-                signersList[i] = signersList[signersList.length - 1];
-                signersList.pop();
+        require(isOwner[signer], "Not a signer");
+
+        isOwner[signer] = false;
+        for (uint256 i = 0; i < _owners.length; i++) {
+            if (_owners[i] == signer) {
+                _owners[i] = _owners[_owners.length - 1];
+                _owners.pop();
                 break;
             }
         }
-        
+
         emit SignerRemoved(signer);
     }
-    
-    function submitMultiSigTx(address to, uint256 value, bytes memory data) external returns (uint256) {
-        require(signers[msg.sender], "Not a signer");
-        
-        uint256 txId = multiSigTxCounter++;
-        multiSigTxs[txId] = MultiSigTransaction({
-            to: to,
-            value: value,
-            data: data,
-            executed: false,
-            confirmations: 0
+
+    function changeRequiredSignatures(uint256 newRequired) external onlyOwner {
+        require(
+            newRequired > 0 && newRequired <= _owners.length,
+            "Invalid required signatures"
+        );
+        requiredSignatures = newRequired;
+        emit RequiredSignaturesChanged(newRequired);
+    }
+
+    function getOwnerCount() external view returns (uint256) {
+        return _owners.length;
+    }
+
+    function getOwners() external view returns (address[] memory) {
+        return _owners;
+    }
+
+    // ==================== Escrow de NFTs ====================
+
+    /// @notice Deposita un NFT en custodia a favor de `beneficiary`.
+    function depositNFT(uint256 tokenId, address beneficiary) external nonReentrant {
+        require(beneficiary != address(0), "Invalid beneficiary");
+
+        // Revierte si quien llama no es el propietario o no ha aprobado.
+        nft.transferFrom(msg.sender, address(this), tokenId);
+
+        escrows[tokenId] = Escrow({
+            tokenId: tokenId,
+            depositor: msg.sender,
+            beneficiary: beneficiary,
+            released: false
         });
-        
-        emit MultiSigTxSubmitted(txId, msg.sender);
-        confirmMultiSigTx(txId);
+
+        emit NFTDeposited(tokenId, msg.sender, beneficiary);
+    }
+
+    /// @notice Entrega el NFT en custodia a su beneficiario.
+    function releaseNFT(uint256 tokenId) external nonReentrant {
+        Escrow storage escrow = escrows[tokenId];
+        require(escrow.depositor == msg.sender, "Not depositor");
+        require(!escrow.released, "Already released");
+
+        escrow.released = true;
+        nft.transferFrom(address(this), escrow.beneficiary, tokenId);
+
+        emit NFTReleased(tokenId, escrow.beneficiary);
+    }
+
+    /// @notice Devuelve el NFT en custodia a quien lo deposito.
+    function refundNFT(uint256 tokenId) external nonReentrant {
+        Escrow storage escrow = escrows[tokenId];
+        require(escrow.depositor == msg.sender, "Not depositor");
+        require(!escrow.released, "Already released");
+
+        escrow.released = true;
+        nft.transferFrom(address(this), escrow.depositor, tokenId);
+
+        emit NFTRefunded(tokenId, escrow.depositor);
+    }
+
+    // ==================== Multi-firma ====================
+
+    /// @notice Propone un pago. Quien propone firma automaticamente.
+    function submitTransaction(address to, uint256 amount) external returns (uint256) {
+        require(isOwner[msg.sender], "Not a signer");
+        require(to != address(0), "Invalid recipient");
+
+        uint256 txId = _transactionCount;
+        _transactionCount++;
+
+        transactions[txId] = Transaction({
+            to: to,
+            amount: amount,
+            executed: false,
+            signatureCount: 1
+        });
+        hasSigned[txId][msg.sender] = true;
+
+        emit TransactionSubmitted(txId, to, amount);
         return txId;
     }
-    
-    function confirmMultiSigTx(uint256 txId) public {
-        require(signers[msg.sender], "Not a signer");
-        require(!confirmations[txId][msg.sender], "Already confirmed");
-        require(!multiSigTxs[txId].executed, "Already executed");
-        
-        confirmations[txId][msg.sender] = true;
-        multiSigTxs[txId].confirmations++;
-        
-        emit MultiSigTxConfirmed(txId, msg.sender);
-        
-        if (multiSigTxs[txId].confirmations >= requiredConfirmations) {
-            executeMultiSigTx(txId);
-        }
+
+    function signTransaction(uint256 txId) external {
+        require(isOwner[msg.sender], "Not a signer");
+        require(!transactions[txId].executed, "Already executed");
+        require(!hasSigned[txId][msg.sender], "Already signed");
+
+        hasSigned[txId][msg.sender] = true;
+        transactions[txId].signatureCount += 1;
+
+        emit TransactionSigned(txId, msg.sender);
     }
-    
-    function executeMultiSigTx(uint256 txId) internal {
-        MultiSigTransaction storage transaction = multiSigTxs[txId];
-        require(!transaction.executed, "Already executed");
-        require(transaction.confirmations >= requiredConfirmations, "Not enough confirmations");
-        
-        transaction.executed = true;
-        
-        (bool success, ) = transaction.to.call{value: transaction.value}(transaction.data);
-        require(success, "Transaction execution failed");
-        
-        emit MultiSigTxExecuted(txId);
+
+    /// @notice Retira una firma ya emitida.
+    function revokeSignature(uint256 txId) external {
+        require(!transactions[txId].executed, "Already executed");
+        require(hasSigned[txId][msg.sender], "Not signed");
+
+        hasSigned[txId][msg.sender] = false;
+        transactions[txId].signatureCount -= 1;
+
+        emit SignatureRevoked(txId, msg.sender);
     }
-    
-    // ============ Admin Functions ============
-    
-    function setRewardRate(uint256 newRate) external onlyOwner {
-        require(newRate <= 1000, "Rate too high"); // Max 10% per day
-        rewardRate = newRate;
-    }
-    
-    function setRequiredConfirmations(uint256 newRequired) external onlyOwner {
-        require(newRequired > 0 && newRequired <= signersList.length, "Invalid confirmation count");
-        requiredConfirmations = newRequired;
-    }
-    
-    function pause() external onlyOwner {
-        _pause();
-    }
-    
-    function unpause() external onlyOwner {
-        _unpause();
-    }
-    
-    function emergencyWithdraw(address token, uint256 amount) external onlyOwner {
-        if (token == address(0)) {
-            payable(owner()).transfer(amount);
-        } else {
-            IERC20(token).transfer(owner(), amount);
-        }
-    }
-    
-    // ============ View Functions ============
-    
-    function getStakeInfo(address user) external view returns (
-        uint256 amount,
-        uint256 startTime,
-        uint256 lastClaimTime,
-        uint256 pendingRewards,
-        bool active
-    ) {
-        Stake memory userStake = stakes[user];
-        return (
-            userStake.amount,
-            userStake.startTime,
-            userStake.lastClaimTime,
-            calculateRewards(user),
-            userStake.active
+
+    /// @notice Ejecuta el pago cuando hay firmas suficientes.
+    function executeTransaction(uint256 txId) external nonReentrant {
+        require(!transactions[txId].executed, "Already executed");
+        require(
+            transactions[txId].signatureCount >= requiredSignatures,
+            "Not enough signatures"
         );
-    }
-    
-    function getEscrowInfo(uint256 escrowId) external view returns (
-        address nftContract,
-        uint256 tokenId,
-        address seller,
-        address buyer,
-        uint256 price,
-        bool completed,
-        uint256 deadline
-    ) {
-        NFTEscrow memory escrow = escrows[escrowId];
-        return (
-            escrow.nftContract,
-            escrow.tokenId,
-            escrow.seller,
-            escrow.buyer,
-            escrow.price,
-            escrow.completed,
-            escrow.deadline
+
+        transactions[txId].executed = true;
+
+        require(
+            token.transferFrom(address(this), transactions[txId].to, transactions[txId].amount),
+            "Payment failed"
         );
+
+        emit TransactionExecuted(txId);
     }
-    
-    function getSigners() external view returns (address[] memory) {
-        return signersList;
+
+    function getTransactionCount() external view returns (uint256) {
+        return _transactionCount;
     }
-    
-    receive() external payable {}
 }

@@ -1,350 +1,282 @@
 // SPDX-License-Identifier: MIT
-pragma solidity ^0.8.0;
+pragma solidity ^0.8.20;
 
 import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
-import "@openzeppelin/contracts/token/ERC20/ERC20.sol";
-import "@openzeppelin/contracts/security/ReentrancyGuard.sol";
-import "@openzeppelin/contracts/security/Pausable.sol";
+import "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import "@openzeppelin/contracts/access/Ownable.sol";
+import "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
+
+interface IPriceOracle {
+    function getPrice(address asset) external view returns (uint256);
+}
 
 /**
  * @title Lending
- * @dev Collateralized lending protocol with dynamic interest rates
+ * @dev Protocolo de prestamos con colateral, tasa dinamica y liquidaciones.
+ * @notice Implementado segun test/contracts/Lending.test.cjs.
+ * @dev Los factores y tasas se expresan en PORCENTAJE (75 = 75%, 2 = 2%),
+ *      tal y como los pasa la especificacion.
  */
-contract Lending is ReentrancyGuard, Pausable, Ownable {
-    // Supported assets
-    struct Asset {
-        bool isSupported;
-        uint256 collateralFactor; // e.g., 75% = 7500
-        uint256 liquidationThreshold; // e.g., 80% = 8000
-        uint256 liquidationPenalty; // e.g., 5% = 500
-        uint256 baseRate; // Base interest rate per year
-        uint256 multiplier; // Interest rate multiplier
-        uint256 totalDeposits;
+contract Lending is Ownable, ReentrancyGuard {
+    using SafeERC20 for IERC20;
+
+    struct Market {
+        bool isListed;
+        uint256 collateralFactor;      // %  (75 = 75%)
+        uint256 liquidationThreshold;  // %  (80 = 80%)
+        uint256 liquidationPenalty;    // %  (5 = 5%)
+        uint256 baseRate;              // % anual con utilizacion 0
+        uint256 rateSlope;             // pendiente de la curva de tipos
+        uint256 totalSupply;
         uint256 totalBorrows;
-        uint256 reserveFactor; // Protocol reserve
     }
-    
-    // User position
+
     struct UserPosition {
-        uint256 deposited;
+        uint256 supplied;
         uint256 borrowed;
-        uint256 borrowIndex;
-        uint256 lastUpdateTime;
     }
-    
-    // Price oracle interface
-    interface IPriceOracle {
-        function getPrice(address asset) external view returns (uint256);
-    }
-    
-    // Constants
-    uint256 public constant PRECISION = 10000;
-    uint256 public constant SECONDS_PER_YEAR = 31536000;
-    
-    // State
+
+    /// @dev Escala de precios y del health factor (1e18 = 1.0).
+    uint256 public constant PRECISION = 1e18;
+    /// @dev Escala de los porcentajes.
+    uint256 public constant PERCENT = 100;
+
     IPriceOracle public priceOracle;
-    mapping(address => Asset) public assets;
-    mapping(address => mapping(address => UserPosition)) public positions; // user => asset => position
+
+    mapping(address => Market) public markets;
+    mapping(address => mapping(address => UserPosition)) public userPositions;
     address[] public supportedAssets;
-    
-    // Interest rate model
-    uint256 public optimalUtilization = 8000; // 80%
-    uint256 public baseMultiplier = 200; // 2%
-    uint256 public jumpMultiplier = 2000; // 20%
-    
-    // Events
-    event Deposit(address indexed user, address indexed asset, uint256 amount);
+
+    event MarketCreated(address indexed asset, uint256 collateralFactor, uint256 liquidationThreshold, uint256 baseRate);
+    event Supply(address indexed user, address indexed asset, uint256 amount);
     event Withdraw(address indexed user, address indexed asset, uint256 amount);
     event Borrow(address indexed user, address indexed asset, uint256 amount);
     event Repay(address indexed user, address indexed asset, uint256 amount);
     event Liquidation(
         address indexed liquidator,
-        address indexed borrower,
-        address indexed asset,
-        uint256 debtRepaid,
+        address indexed user,
+        address collateralAsset,
+        address borrowAsset,
+        uint256 amountRepaid,
         uint256 collateralSeized
     );
-    event AssetAdded(address indexed asset);
-    event AssetUpdated(address indexed asset);
-    
-    constructor(address _priceOracle) {
+
+    constructor(address _priceOracle) Ownable(msg.sender) {
         priceOracle = IPriceOracle(_priceOracle);
     }
-    
-    // ============ Admin Functions ============
-    
-    function addAsset(
+
+    // ==================== Mercados ====================
+
+    function createMarket(
         address asset,
         uint256 collateralFactor,
         uint256 liquidationThreshold,
-        uint256 liquidationPenalty,
-        uint256 baseRate,
-        uint256 reserveFactor
+        uint256 baseRate
     ) external onlyOwner {
-        require(!assets[asset].isSupported, "Asset already supported");
-        
-        assets[asset] = Asset({
-            isSupported: true,
-            collateralFactor: collateralFactor,
-            liquidationThreshold: liquidationThreshold,
-            liquidationPenalty: liquidationPenalty,
-            baseRate: baseRate,
-            multiplier: baseMultiplier,
-            totalDeposits: 0,
-            totalBorrows: 0,
-            reserveFactor: reserveFactor
-        });
-        
+        require(asset != address(0), "Invalid asset");
+        require(!markets[asset].isListed, "Market exists");
+        require(collateralFactor > 0 && collateralFactor <= PERCENT, "Invalid collateral factor");
+        require(
+            liquidationThreshold > 0 && liquidationThreshold <= PERCENT,
+            "Invalid liquidation threshold"
+        );
+
+        Market storage market = markets[asset];
+        market.isListed = true;
+        market.collateralFactor = collateralFactor;
+        market.liquidationThreshold = liquidationThreshold;
+        market.liquidationPenalty = 5;
+        market.baseRate = baseRate;
+        market.rateSlope = 50;
+
         supportedAssets.push(asset);
-        emit AssetAdded(asset);
+
+        emit MarketCreated(asset, collateralFactor, liquidationThreshold, baseRate);
     }
-    
-    function updateAsset(
-        address asset,
-        uint256 collateralFactor,
-        uint256 liquidationThreshold,
-        uint256 liquidationPenalty
-    ) external onlyOwner {
-        require(assets[asset].isSupported, "Asset not supported");
-        
-        Asset storage assetData = assets[asset];
-        assetData.collateralFactor = collateralFactor;
-        assetData.liquidationThreshold = liquidationThreshold;
-        assetData.liquidationPenalty = liquidationPenalty;
-        
-        emit AssetUpdated(asset);
-    }
-    
+
     function setPriceOracle(address _priceOracle) external onlyOwner {
         priceOracle = IPriceOracle(_priceOracle);
     }
-    
-    // ============ Core Functions ============
-    
-    function deposit(address asset, uint256 amount) external nonReentrant whenNotPaused {
-        require(assets[asset].isSupported, "Asset not supported");
-        require(amount > 0, "Amount must be > 0");
-        
-        _accrueInterest(asset);
-        
-        IERC20(asset).transferFrom(msg.sender, address(this), amount);
-        
-        positions[msg.sender][asset].deposited += amount;
-        assets[asset].totalDeposits += amount;
-        
-        emit Deposit(msg.sender, asset, amount);
-    }
-    
-    function withdraw(address asset, uint256 amount) external nonReentrant {
-        require(assets[asset].isSupported, "Asset not supported");
-        
-        _accrueInterest(asset);
-        
-        UserPosition storage position = positions[msg.sender][asset];
-        require(position.deposited >= amount, "Insufficient balance");
-        
-        position.deposited -= amount;
-        assets[asset].totalDeposits -= amount;
-        
-        // Check health factor after withdrawal
-        require(getHealthFactor(msg.sender) >= PRECISION, "Would be undercollateralized");
-        
-        IERC20(asset).transfer(msg.sender, amount);
-        
-        emit Withdraw(msg.sender, asset, amount);
-    }
-    
-    function borrow(address asset, uint256 amount) external nonReentrant whenNotPaused {
-        require(assets[asset].isSupported, "Asset not supported");
-        require(amount > 0, "Amount must be > 0");
-        
-        _accrueInterest(asset);
-        
-        Asset storage assetData = assets[asset];
-        require(assetData.totalDeposits - assetData.totalBorrows >= amount, "Insufficient liquidity");
-        
-        UserPosition storage position = positions[msg.sender][asset];
-        position.borrowed += amount;
-        position.lastUpdateTime = block.timestamp;
-        assetData.totalBorrows += amount;
-        
-        // Check health factor after borrowing
-        require(getHealthFactor(msg.sender) >= PRECISION, "Would be undercollateralized");
-        
-        IERC20(asset).transfer(msg.sender, amount);
-        
-        emit Borrow(msg.sender, asset, amount);
-    }
-    
-    function repay(address asset, uint256 amount) external nonReentrant {
-        require(assets[asset].isSupported, "Asset not supported");
-        
-        _accrueInterest(asset);
-        
-        UserPosition storage position = positions[msg.sender][asset];
-        uint256 debt = position.borrowed;
-        uint256 repayAmount = amount > debt ? debt : amount;
-        
-        IERC20(asset).transferFrom(msg.sender, address(this), repayAmount);
-        
-        position.borrowed -= repayAmount;
-        assets[asset].totalBorrows -= repayAmount;
-        
-        emit Repay(msg.sender, asset, repayAmount);
-    }
-    
-    function liquidate(
-        address borrower,
-        address collateralAsset,
-        address debtAsset,
-        uint256 debtAmount
-    ) external nonReentrant {
-        require(getHealthFactor(borrower) < PRECISION, "Cannot liquidate healthy position");
-        
-        _accrueInterest(collateralAsset);
-        _accrueInterest(debtAsset);
-        
-        UserPosition storage debtPosition = positions[borrower][debtAsset];
-        require(debtPosition.borrowed >= debtAmount, "Debt amount too high");
-        
-        // Calculate collateral to seize
-        uint256 debtValue = debtAmount * priceOracle.getPrice(debtAsset) / 1e18;
-        uint256 collateralPrice = priceOracle.getPrice(collateralAsset);
-        uint256 liquidationBonus = PRECISION + assets[collateralAsset].liquidationPenalty;
-        uint256 collateralToSeize = (debtValue * liquidationBonus * 1e18) / (collateralPrice * PRECISION);
-        
-        UserPosition storage collateralPosition = positions[borrower][collateralAsset];
-        require(collateralPosition.deposited >= collateralToSeize, "Insufficient collateral");
-        
-        // Execute liquidation
-        IERC20(debtAsset).transferFrom(msg.sender, address(this), debtAmount);
-        
-        debtPosition.borrowed -= debtAmount;
-        assets[debtAsset].totalBorrows -= debtAmount;
-        
-        collateralPosition.deposited -= collateralToSeize;
-        assets[collateralAsset].totalDeposits -= collateralToSeize;
-        
-        IERC20(collateralAsset).transfer(msg.sender, collateralToSeize);
-        
-        emit Liquidation(msg.sender, borrower, debtAsset, debtAmount, collateralToSeize);
-    }
-    
-    // ============ Interest Functions ============
-    
-    function _accrueInterest(address asset) internal {
-        Asset storage assetData = assets[asset];
-        if (assetData.totalBorrows == 0) return;
-        
-        uint256 borrowRate = getBorrowRate(asset);
-        uint256 interestAccrued = (assetData.totalBorrows * borrowRate) / SECONDS_PER_YEAR;
-        
-        uint256 reserveAmount = (interestAccrued * assetData.reserveFactor) / PRECISION;
-        assetData.totalBorrows += interestAccrued - reserveAmount;
-    }
-    
-    function getBorrowRate(address asset) public view returns (uint256) {
-        Asset storage assetData = assets[asset];
-        if (assetData.totalDeposits == 0) return assetData.baseRate;
-        
-        uint256 utilization = (assetData.totalBorrows * PRECISION) / assetData.totalDeposits;
-        
-        if (utilization <= optimalUtilization) {
-            return assetData.baseRate + (utilization * baseMultiplier) / PRECISION;
-        } else {
-            uint256 excessUtilization = utilization - optimalUtilization;
-            return assetData.baseRate + 
-                   (optimalUtilization * baseMultiplier) / PRECISION +
-                   (excessUtilization * jumpMultiplier) / PRECISION;
-        }
-    }
-    
-    function getSupplyRate(address asset) public view returns (uint256) {
-        Asset storage assetData = assets[asset];
-        if (assetData.totalDeposits == 0) return 0;
-        
-        uint256 utilization = (assetData.totalBorrows * PRECISION) / assetData.totalDeposits;
-        uint256 borrowRate = getBorrowRate(asset);
-        
-        return (borrowRate * utilization * (PRECISION - assetData.reserveFactor)) / (PRECISION * PRECISION);
-    }
-    
-    // ============ View Functions ============
-    
-    function getHealthFactor(address user) public view returns (uint256) {
-        uint256 totalCollateralValue = 0;
-        uint256 totalDebtValue = 0;
-        
-        for (uint256 i = 0; i < supportedAssets.length; i++) {
-            address asset = supportedAssets[i];
-            UserPosition storage position = positions[user][asset];
-            uint256 price = priceOracle.getPrice(asset);
-            
-            if (position.deposited > 0) {
-                uint256 collateralValue = (position.deposited * price * assets[asset].collateralFactor) / (1e18 * PRECISION);
-                totalCollateralValue += collateralValue;
-            }
-            
-            if (position.borrowed > 0) {
-                uint256 debtValue = (position.borrowed * price) / 1e18;
-                totalDebtValue += debtValue;
-            }
-        }
-        
-        if (totalDebtValue == 0) return type(uint256).max;
-        return (totalCollateralValue * PRECISION) / totalDebtValue;
-    }
-    
-    function getUserPosition(address user, address asset) external view returns (
-        uint256 deposited,
-        uint256 borrowed,
-        uint256 depositValue,
-        uint256 borrowValue
-    ) {
-        UserPosition storage position = positions[user][asset];
-        uint256 price = priceOracle.getPrice(asset);
-        
-        return (
-            position.deposited,
-            position.borrowed,
-            (position.deposited * price) / 1e18,
-            (position.borrowed * price) / 1e18
-        );
-    }
-    
-    function getAssetData(address asset) external view returns (
-        uint256 totalDeposits,
-        uint256 totalBorrows,
-        uint256 utilization,
-        uint256 borrowRate,
-        uint256 supplyRate
-    ) {
-        Asset storage assetData = assets[asset];
-        uint256 util = assetData.totalDeposits > 0 
-            ? (assetData.totalBorrows * PRECISION) / assetData.totalDeposits 
-            : 0;
-        
-        return (
-            assetData.totalDeposits,
-            assetData.totalBorrows,
-            util,
-            getBorrowRate(asset),
-            getSupplyRate(asset)
-        );
-    }
-    
+
     function getSupportedAssets() external view returns (address[] memory) {
         return supportedAssets;
     }
-    
-    // ============ Emergency Functions ============
-    
-    function pause() external onlyOwner {
-        _pause();
+
+    // ==================== Operaciones ====================
+
+    function supply(address asset, uint256 amount) external nonReentrant {
+        Market storage market = markets[asset];
+        require(market.isListed, "Market not found");
+        require(amount > 0, "Amount must be > 0");
+
+        IERC20(asset).safeTransferFrom(msg.sender, address(this), amount);
+
+        userPositions[msg.sender][asset].supplied += amount;
+        market.totalSupply += amount;
+
+        emit Supply(msg.sender, asset, amount);
     }
-    
-    function unpause() external onlyOwner {
-        _unpause();
+
+    function withdraw(address asset, uint256 amount) external nonReentrant {
+        Market storage market = markets[asset];
+        require(market.isListed, "Market not found");
+
+        UserPosition storage position = userPositions[msg.sender][asset];
+        require(position.supplied >= amount, "Insufficient balance");
+
+        position.supplied -= amount;
+        market.totalSupply -= amount;
+
+        // No se puede retirar colateral dejando la posicion sin salud.
+        require(_healthFactor(msg.sender) >= PRECISION, "Insufficient collateral");
+
+        IERC20(asset).safeTransfer(msg.sender, amount);
+
+        emit Withdraw(msg.sender, asset, amount);
+    }
+
+    function borrow(address asset, uint256 amount) external nonReentrant {
+        Market storage market = markets[asset];
+        require(market.isListed, "Market not found");
+        require(amount > 0, "Amount must be > 0");
+        require(
+            market.totalSupply - market.totalBorrows >= amount,
+            "Insufficient liquidity"
+        );
+
+        UserPosition storage position = userPositions[msg.sender][asset];
+        position.borrowed += amount;
+        market.totalBorrows += amount;
+
+        require(_debtValue(msg.sender) <= _maxBorrowValue(msg.sender), "Insufficient collateral");
+
+        IERC20(asset).safeTransfer(msg.sender, amount);
+
+        emit Borrow(msg.sender, asset, amount);
+    }
+
+    function repay(address asset, uint256 amount) external nonReentrant {
+        Market storage market = markets[asset];
+        require(market.isListed, "Market not found");
+
+        UserPosition storage position = userPositions[msg.sender][asset];
+        uint256 debt = position.borrowed;
+        require(debt > 0, "No debt");
+
+        uint256 repayAmount = amount == type(uint256).max ? debt : amount;
+        if (repayAmount > debt) {
+            repayAmount = debt;
+        }
+
+        IERC20(asset).safeTransferFrom(msg.sender, address(this), repayAmount);
+
+        position.borrowed -= repayAmount;
+        market.totalBorrows -= repayAmount;
+
+        emit Repay(msg.sender, asset, repayAmount);
+    }
+
+    /// @notice Liquida una posicion sin salud.
+    function liquidate(
+        address user,
+        address collateralAsset,
+        address borrowAsset,
+        uint256 amount
+    ) external nonReentrant {
+        require(_healthFactor(user) < PRECISION, "Position is healthy");
+
+        UserPosition storage debt = userPositions[user][borrowAsset];
+        UserPosition storage collateral = userPositions[user][collateralAsset];
+
+        require(amount > 0 && amount <= debt.borrowed, "Invalid amount");
+
+        uint256 priceCollateral = priceOracle.getPrice(collateralAsset);
+        uint256 priceBorrow = priceOracle.getPrice(borrowAsset);
+        require(priceCollateral > 0 && priceBorrow > 0, "Invalid price");
+
+        Market storage borrowMarket = markets[borrowAsset];
+        Market storage collateralMarket = markets[collateralAsset];
+
+        uint256 repayValue = (amount * priceBorrow) / PRECISION;
+        uint256 seizeValue = (repayValue * (PERCENT + collateralMarket.liquidationPenalty)) / PERCENT;
+        uint256 seizeAmount = (seizeValue * PRECISION) / priceCollateral;
+
+        require(seizeAmount <= collateral.supplied, "Insufficient collateral");
+
+        IERC20(borrowAsset).safeTransferFrom(msg.sender, address(this), amount);
+
+        debt.borrowed -= amount;
+        borrowMarket.totalBorrows -= amount;
+
+        collateral.supplied -= seizeAmount;
+        collateralMarket.totalSupply -= seizeAmount;
+
+        IERC20(collateralAsset).safeTransfer(msg.sender, seizeAmount);
+
+        emit Liquidation(msg.sender, user, collateralAsset, borrowAsset, amount, seizeAmount);
+    }
+
+    // ==================== Vistas ====================
+
+    /// @notice Tasa de interes anual (%) segun la utilizacion del mercado.
+    function getInterestRate(address asset) external view returns (uint256) {
+        Market storage market = markets[asset];
+        if (market.totalSupply == 0) {
+            return market.baseRate;
+        }
+        uint256 utilization = (market.totalBorrows * PERCENT) / market.totalSupply;
+        return market.baseRate + ((utilization * market.rateSlope) / PERCENT);
+    }
+
+    /// @notice 1e18 = 1.0. Por debajo de 1e18 la posicion es liquidable.
+    function getHealthFactor(address user) external view returns (uint256) {
+        return _healthFactor(user);
+    }
+
+    function _healthFactor(address user) internal view returns (uint256) {
+        uint256 debtValue = _debtValue(user);
+        if (debtValue == 0) {
+            return type(uint256).max;
+        }
+        return (_weightedCollateralValue(user) * PRECISION) / debtValue;
+    }
+
+    function _debtValue(address user) internal view returns (uint256) {
+        uint256 total = 0;
+        for (uint256 i = 0; i < supportedAssets.length; i++) {
+            address asset = supportedAssets[i];
+            uint256 borrowed = userPositions[user][asset].borrowed;
+            if (borrowed > 0) {
+                total += (borrowed * priceOracle.getPrice(asset)) / PRECISION;
+            }
+        }
+        return total;
+    }
+
+    /// @dev Colateral valorado con el umbral de liquidacion de cada activo.
+    function _weightedCollateralValue(address user) internal view returns (uint256) {
+        uint256 total = 0;
+        for (uint256 i = 0; i < supportedAssets.length; i++) {
+            address asset = supportedAssets[i];
+            uint256 supplied = userPositions[user][asset].supplied;
+            if (supplied > 0) {
+                uint256 value = (supplied * priceOracle.getPrice(asset)) / PRECISION;
+                total += (value * markets[asset].liquidationThreshold) / PERCENT;
+            }
+        }
+        return total;
+    }
+
+    function _maxBorrowValue(address user) internal view returns (uint256) {
+        uint256 total = 0;
+        for (uint256 i = 0; i < supportedAssets.length; i++) {
+            address asset = supportedAssets[i];
+            uint256 supplied = userPositions[user][asset].supplied;
+            if (supplied > 0) {
+                uint256 value = (supplied * priceOracle.getPrice(asset)) / PRECISION;
+                total += (value * markets[asset].collateralFactor) / PERCENT;
+            }
+        }
+        return total;
     }
 }
