@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback } from 'react';
 import TOKENS from '../data/tokens';
+import ASuiteOnChain from '../components/ASuiteOnChain';
 
 function generateChartData() {
   const data = [];
@@ -194,6 +195,8 @@ export default function Exchange() {
           );
         })}
       </div>
+
+      <ASuiteOnChain />
 
       <p className="text-center text-xs text-gray-600">
         Datos simulados &mdash; se actualizan cada 3 s &middot; A-Suite Token Exchange
