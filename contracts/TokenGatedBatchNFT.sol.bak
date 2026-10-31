@@ -1,0 +1,617 @@
+// SPDX-License-Identifier: MIT
+pragma solidity ^0.8.19;
+
+import "@openzeppelin/contracts/token/ERC721/ERC721.sol";
+import "@openzeppelin/contracts/token/ERC721/extensions/ERC721Enumerable.sol";
+import "@openzeppelin/contracts/access/Ownable.sol";
+import "@openzeppelin/contracts/security/ReentrancyGuard.sol";
+import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
+import "@chainlink/contracts/src/v0.8/interfaces/VRFCoordinatorV2Interface.sol";
+import "@chainlink/contracts/src/v0.8/VRFConsumerBaseV2.sol";
+import "@chainlink/contracts/src/v0.8/interfaces/AutomationCompatibleInterface.sol";
+
+/**
+ * @title TokenGatedBatchNFT
+ * @dev Colección de NFTs con las siguientes características:
+ *      - Token-gated minting: Reclamos proporcionales al balance de tokens
+ *      - Batch reveal con Chainlink VRF: Revelación aleatoria eficiente
+ *      - Sistema de alimentación: Los tokens potencian los NFTs
+ *      - Chainlink Automation: Proceso automático de revelación
+ * 
+ * @notice Este contrato integra MinerToken con NFTs usando Chainlink VRF y Automation
+ */
+contract TokenGatedBatchNFT is 
+    ERC721, 
+    ERC721Enumerable, 
+    Ownable, 
+    ReentrancyGuard,
+    VRFConsumerBaseV2,
+    AutomationCompatibleInterface 
+{
+    // ============ ESTRUCTURAS ============
+    
+    struct NFTAttributes {
+        uint256 power;              // Poder del NFT (aumenta con tokens)
+        uint256 level;              // Nivel del NFT
+        uint256 tokensStaked;       // Tokens alimentando este NFT
+        uint256 lastFeedTime;       // Última vez que fue alimentado
+        bool isRevealed;            // Si ya fue revelado
+        uint256 revealedTraitSeed;  // Seed para traits aleatorios
+    }
+    
+    struct ClaimTier {
+        uint256 minTokens;          // Mínimo de tokens requeridos
+        uint256 maxClaims;          // Máximo de claims permitidos
+        uint256 cooldownPeriod;     // Período de cooldown en segundos
+    }
+    
+    // ============ VARIABLES DE ESTADO ============
+    
+    // Token de gobernanza/utilidad
+    IERC20 public governanceToken;
+    
+    // Contadores
+    uint256 private _tokenIdCounter;
+    uint256 public maxSupply;
+    
+    // Mapeos de NFTs
+    mapping(uint256 => NFTAttributes) public nftAttributes;
+    mapping(address => uint256) public lastClaimTime;
+    mapping(address => uint256) public totalClaimed;
+    
+    // Tiers de reclamo
+    ClaimTier[] public claimTiers;
+    
+    // Configuración de batch reveal
+    uint256 public revealBatchSize = 100;       // NFTs por batch
+    uint256 public revealInterval = 1 hours;    // Intervalo entre reveals
+    uint256 public lastRevealTime;
+    uint256 public revealedCount;
+    bool public revealInProgress;
+    
+    // URIs
+    string private _baseTokenURI;
+    string private _unrevealedURI;
+    
+    // Configuración de alimentación
+    uint256 public feedCooldown = 1 days;       // Cooldown para alimentar
+    uint256 public powerPerToken = 10;          // Poder ganado por token
+    uint256 public maxPower = 1000;             // Poder máximo
+    
+    // ============ CHAINLINK VRF ============
+    
+    VRFCoordinatorV2Interface private immutable VRF_COORDINATOR;
+    uint64 private immutable VRF_SUBSCRIPTION_ID;
+    bytes32 private immutable VRF_GAS_LANE;
+    uint32 private immutable VRF_CALLBACK_GAS_LIMIT;
+    uint16 private constant VRF_REQUEST_CONFIRMATIONS = 3;
+    uint32 private constant VRF_NUM_WORDS = 1;
+    
+    uint256 public lastVRFRequestId;
+    mapping(uint256 => bool) public vrfRequestPending;
+    
+    // ============ EVENTOS ============
+    
+    event NFTClaimed(address indexed claimer, uint256 indexed tokenId, uint256 tierUsed);
+    event NFTFed(uint256 indexed tokenId, address indexed feeder, uint256 tokensAmount, uint256 newPower);
+    event BatchRevealRequested(uint256 requestId, uint256 batchStart, uint256 batchEnd);
+    event BatchRevealed(uint256 batchStart, uint256 batchEnd, uint256 randomSeed);
+    event TierAdded(uint256 tierIndex, uint256 minTokens, uint256 maxClaims);
+    event TierUpdated(uint256 tierIndex, uint256 minTokens, uint256 maxClaims);
+    
+    // ============ CONSTRUCTOR ============
+    
+    /**
+     * @dev Constructor del TokenGatedBatchNFT
+     * @param _name Nombre de la colección
+     * @param _symbol Símbolo de la colección
+     * @param _governanceToken Dirección del token de gobernanza (MinerToken)
+     * @param _maxSupply Supply máximo de NFTs
+     * @param _vrfCoordinator Dirección del VRF Coordinator
+     * @param _subscriptionId ID de suscripción VRF
+     * @param _gasLane Gas lane para VRF
+     * @param _callbackGasLimit Gas limit para callback VRF
+     */
+    constructor(
+        string memory _name,
+        string memory _symbol,
+        address _governanceToken,
+        uint256 _maxSupply,
+        address _vrfCoordinator,
+        uint64 _subscriptionId,
+        bytes32 _gasLane,
+        uint32 _callbackGasLimit
+    ) 
+        ERC721(_name, _symbol) 
+        VRFConsumerBaseV2(_vrfCoordinator)
+    {
+        governanceToken = IERC20(_governanceToken);
+        maxSupply = _maxSupply;
+        
+        VRF_COORDINATOR = VRFCoordinatorV2Interface(_vrfCoordinator);
+        VRF_SUBSCRIPTION_ID = _subscriptionId;
+        VRF_GAS_LANE = _gasLane;
+        VRF_CALLBACK_GAS_LIMIT = _callbackGasLimit;
+        
+        lastRevealTime = block.timestamp;
+        
+        // Inicializar tiers por defecto
+        // Tier 0: 100+ tokens = 1 claim cada 24h
+        claimTiers.push(ClaimTier({
+            minTokens: 100 * 10**18,
+            maxClaims: 1,
+            cooldownPeriod: 24 hours
+        }));
+        
+        // Tier 1: 500+ tokens = 2 claims cada 24h
+        claimTiers.push(ClaimTier({
+            minTokens: 500 * 10**18,
+            maxClaims: 2,
+            cooldownPeriod: 24 hours
+        }));
+        
+        // Tier 2: 1000+ tokens = 5 claims cada 24h
+        claimTiers.push(ClaimTier({
+            minTokens: 1000 * 10**18,
+            maxClaims: 5,
+            cooldownPeriod: 24 hours
+        }));
+        
+        // Tier 3: 5000+ tokens = 10 claims cada 12h
+        claimTiers.push(ClaimTier({
+            minTokens: 5000 * 10**18,
+            maxClaims: 10,
+            cooldownPeriod: 12 hours
+        }));
+        
+        // Tier 4: 10000+ tokens = 20 claims cada 6h
+        claimTiers.push(ClaimTier({
+            minTokens: 10000 * 10**18,
+            maxClaims: 20,
+            cooldownPeriod: 6 hours
+        }));
+    }
+    
+    // ============ FUNCIONES DE CLAIM ============
+    
+    /**
+     * @dev Reclama NFTs basado en el balance de tokens
+     * @param quantity Cantidad de NFTs a reclamar
+     */
+    function claim(uint256 quantity) external nonReentrant {
+        require(quantity > 0, "Quantity must be > 0");
+        require(_tokenIdCounter + quantity <= maxSupply, "Max supply reached");
+        
+        // Obtener tier del usuario
+        (uint256 tierIndex, uint256 maxClaims, uint256 cooldown) = getUserTier(msg.sender);
+        require(tierIndex < claimTiers.length, "Insufficient token balance");
+        
+        // Verificar cooldown
+        require(
+            block.timestamp >= lastClaimTime[msg.sender] + cooldown,
+            "Cooldown not finished"
+        );
+        
+        // Verificar cantidad máxima
+        require(quantity <= maxClaims, "Exceeds max claims for tier");
+        
+        // Actualizar estado
+        lastClaimTime[msg.sender] = block.timestamp;
+        totalClaimed[msg.sender] += quantity;
+        
+        // Mintear NFTs
+        for (uint256 i = 0; i < quantity; i++) {
+            uint256 tokenId = _tokenIdCounter;
+            _tokenIdCounter++;
+            
+            _safeMint(msg.sender, tokenId);
+            
+            // Inicializar atributos del NFT
+            nftAttributes[tokenId] = NFTAttributes({
+                power: 1,
+                level: 1,
+                tokensStaked: 0,
+                lastFeedTime: 0,
+                isRevealed: false,
+                revealedTraitSeed: 0
+            });
+            
+            emit NFTClaimed(msg.sender, tokenId, tierIndex);
+        }
+    }
+    
+    /**
+     * @dev Obtiene el tier del usuario basado en su balance de tokens
+     */
+    function getUserTier(address user) public view returns (
+        uint256 tierIndex,
+        uint256 maxClaims,
+        uint256 cooldown
+    ) {
+        uint256 balance = governanceToken.balanceOf(user);
+        
+        // Buscar el tier más alto que califica
+        tierIndex = type(uint256).max; // Indica que no califica
+        
+        for (uint256 i = claimTiers.length; i > 0; i--) {
+            if (balance >= claimTiers[i-1].minTokens) {
+                tierIndex = i - 1;
+                maxClaims = claimTiers[i-1].maxClaims;
+                cooldown = claimTiers[i-1].cooldownPeriod;
+                break;
+            }
+        }
+        
+        return (tierIndex, maxClaims, cooldown);
+    }
+    
+    // ============ FUNCIONES DE ALIMENTACIÓN ============
+    
+    /**
+     * @dev Alimenta un NFT con tokens para aumentar su poder
+     * @param tokenId ID del NFT a alimentar
+     * @param amount Cantidad de tokens a usar
+     */
+    function feedNFT(uint256 tokenId, uint256 amount) external nonReentrant {
+        require(_exists(tokenId), "NFT does not exist");
+        require(ownerOf(tokenId) == msg.sender, "Not the owner");
+        require(amount > 0, "Amount must be > 0");
+        
+        NFTAttributes storage attrs = nftAttributes[tokenId];
+        
+        // Verificar cooldown de alimentación
+        require(
+            block.timestamp >= attrs.lastFeedTime + feedCooldown,
+            "Feed cooldown not finished"
+        );
+        
+        // Transferir tokens al contrato
+        require(
+            governanceToken.transferFrom(msg.sender, address(this), amount),
+            "Token transfer failed"
+        );
+        
+        // Calcular nuevo poder
+        uint256 powerGain = (amount * powerPerToken) / 10**18;
+        uint256 newPower = attrs.power + powerGain;
+        if (newPower > maxPower) {
+            newPower = maxPower;
+        }
+        
+        // Actualizar atributos
+        attrs.power = newPower;
+        attrs.tokensStaked += amount;
+        attrs.lastFeedTime = block.timestamp;
+        
+        // Subir de nivel cada 100 de poder
+        attrs.level = (newPower / 100) + 1;
+        
+        emit NFTFed(tokenId, msg.sender, amount, newPower);
+    }
+    
+    // ============ BATCH REVEAL CON VRF ============
+    
+    /**
+     * @dev Solicita revelación de un batch de NFTs usando VRF
+     */
+    function requestBatchReveal() external onlyOwner {
+        require(!revealInProgress, "Reveal already in progress");
+        require(revealedCount < _tokenIdCounter, "All NFTs revealed");
+        
+        revealInProgress = true;
+        
+        // Solicitar número aleatorio a Chainlink VRF
+        lastVRFRequestId = VRF_COORDINATOR.requestRandomWords(
+            VRF_GAS_LANE,
+            VRF_SUBSCRIPTION_ID,
+            VRF_REQUEST_CONFIRMATIONS,
+            VRF_CALLBACK_GAS_LIMIT,
+            VRF_NUM_WORDS
+        );
+        
+        vrfRequestPending[lastVRFRequestId] = true;
+        
+        uint256 batchEnd = revealedCount + revealBatchSize;
+        if (batchEnd > _tokenIdCounter) {
+            batchEnd = _tokenIdCounter;
+        }
+        
+        emit BatchRevealRequested(lastVRFRequestId, revealedCount, batchEnd);
+    }
+    
+    /**
+     * @dev Callback de Chainlink VRF con el número aleatorio
+     */
+    function fulfillRandomWords(
+        uint256 requestId,
+        uint256[] memory randomWords
+    ) internal override {
+        require(vrfRequestPending[requestId], "Request not pending");
+        
+        vrfRequestPending[requestId] = false;
+        
+        uint256 randomSeed = randomWords[0];
+        
+        // Revelar batch de NFTs
+        uint256 batchEnd = revealedCount + revealBatchSize;
+        if (batchEnd > _tokenIdCounter) {
+            batchEnd = _tokenIdCounter;
+        }
+        
+        for (uint256 i = revealedCount; i < batchEnd; i++) {
+            if (_exists(i)) {
+                nftAttributes[i].isRevealed = true;
+                // Generar seed único para cada NFT
+                nftAttributes[i].revealedTraitSeed = uint256(
+                    keccak256(abi.encodePacked(randomSeed, i))
+                );
+            }
+        }
+        
+        emit BatchRevealed(revealedCount, batchEnd, randomSeed);
+        
+        revealedCount = batchEnd;
+        lastRevealTime = block.timestamp;
+        revealInProgress = false;
+    }
+    
+    // ============ CHAINLINK AUTOMATION ============
+    
+    /**
+     * @dev Verifica si es necesario ejecutar el upkeep (Chainlink Automation)
+     */
+    function checkUpkeep(bytes calldata /* checkData */)
+        external
+        view
+        override
+        returns (bool upkeepNeeded, bytes memory performData)
+    {
+        upkeepNeeded = (
+            !revealInProgress &&
+            revealedCount < _tokenIdCounter &&
+            block.timestamp >= lastRevealTime + revealInterval
+        );
+        
+        performData = "";
+    }
+    
+    /**
+     * @dev Ejecuta el upkeep automático (Chainlink Automation)
+     */
+    function performUpkeep(bytes calldata /* performData */) external override {
+        require(!revealInProgress, "Reveal in progress");
+        require(revealedCount < _tokenIdCounter, "All revealed");
+        require(
+            block.timestamp >= lastRevealTime + revealInterval,
+            "Interval not passed"
+        );
+        
+        // Solicitar VRF para el reveal
+        revealInProgress = true;
+        
+        lastVRFRequestId = VRF_COORDINATOR.requestRandomWords(
+            VRF_GAS_LANE,
+            VRF_SUBSCRIPTION_ID,
+            VRF_REQUEST_CONFIRMATIONS,
+            VRF_CALLBACK_GAS_LIMIT,
+            VRF_NUM_WORDS
+        );
+        
+        vrfRequestPending[lastVRFRequestId] = true;
+        
+        uint256 batchEnd = revealedCount + revealBatchSize;
+        if (batchEnd > _tokenIdCounter) {
+            batchEnd = _tokenIdCounter;
+        }
+        
+        emit BatchRevealRequested(lastVRFRequestId, revealedCount, batchEnd);
+    }
+    
+    // ============ FUNCIONES DE VISTA ============
+    
+    /**
+     * @dev Retorna la URI del token
+     */
+    function tokenURI(uint256 tokenId) public view override returns (string memory) {
+        require(_exists(tokenId), "Token does not exist");
+        
+        if (!nftAttributes[tokenId].isRevealed) {
+            return _unrevealedURI;
+        }
+        
+        return string(abi.encodePacked(_baseTokenURI, _toString(tokenId), ".json"));
+    }
+    
+    /**
+     * @dev Obtiene información completa de un NFT
+     */
+    function getNFTInfo(uint256 tokenId) external view returns (
+        uint256 power,
+        uint256 level,
+        uint256 tokensStaked,
+        bool isRevealed,
+        uint256 traitSeed
+    ) {
+        require(_exists(tokenId), "Token does not exist");
+        NFTAttributes memory attrs = nftAttributes[tokenId];
+        return (
+            attrs.power,
+            attrs.level,
+            attrs.tokensStaked,
+            attrs.isRevealed,
+            attrs.revealedTraitSeed
+        );
+    }
+    
+    /**
+     * @dev Obtiene estadísticas de claim del usuario
+     */
+    function getUserClaimStats(address user) external view returns (
+        uint256 tierIndex,
+        uint256 maxClaims,
+        uint256 cooldown,
+        uint256 lastClaim,
+        uint256 totalUserClaimed,
+        bool canClaimNow
+    ) {
+        (tierIndex, maxClaims, cooldown) = getUserTier(user);
+        lastClaim = lastClaimTime[user];
+        totalUserClaimed = totalClaimed[user];
+        canClaimNow = (tierIndex < claimTiers.length) && 
+                      (block.timestamp >= lastClaim + cooldown);
+    }
+    
+    /**
+     * @dev Obtiene estadísticas globales
+     */
+    function getGlobalStats() external view returns (
+        uint256 totalMinted,
+        uint256 totalRevealed,
+        uint256 _maxSupply,
+        uint256 _revealBatchSize,
+        uint256 _revealInterval,
+        bool _revealInProgress
+    ) {
+        return (
+            _tokenIdCounter,
+            revealedCount,
+            maxSupply,
+            revealBatchSize,
+            revealInterval,
+            revealInProgress
+        );
+    }
+    
+    // ============ FUNCIONES DE ADMINISTRACIÓN ============
+    
+    /**
+     * @dev Actualiza la URI base
+     */
+    function setBaseURI(string memory newBaseURI) external onlyOwner {
+        _baseTokenURI = newBaseURI;
+    }
+    
+    /**
+     * @dev Actualiza la URI de no revelado
+     */
+    function setUnrevealedURI(string memory newUnrevealedURI) external onlyOwner {
+        _unrevealedURI = newUnrevealedURI;
+    }
+    
+    /**
+     * @dev Actualiza el tamaño del batch de reveal
+     */
+    function setRevealBatchSize(uint256 newBatchSize) external onlyOwner {
+        require(newBatchSize > 0 && newBatchSize <= 500, "Invalid batch size");
+        revealBatchSize = newBatchSize;
+    }
+    
+    /**
+     * @dev Actualiza el intervalo de reveal
+     */
+    function setRevealInterval(uint256 newInterval) external onlyOwner {
+        revealInterval = newInterval;
+    }
+    
+    /**
+     * @dev Agrega un nuevo tier de claim
+     */
+    function addClaimTier(
+        uint256 minTokens,
+        uint256 maxClaims,
+        uint256 cooldownPeriod
+    ) external onlyOwner {
+        claimTiers.push(ClaimTier({
+            minTokens: minTokens,
+            maxClaims: maxClaims,
+            cooldownPeriod: cooldownPeriod
+        }));
+        
+        emit TierAdded(claimTiers.length - 1, minTokens, maxClaims);
+    }
+    
+    /**
+     * @dev Actualiza un tier existente
+     */
+    function updateClaimTier(
+        uint256 tierIndex,
+        uint256 minTokens,
+        uint256 maxClaims,
+        uint256 cooldownPeriod
+    ) external onlyOwner {
+        require(tierIndex < claimTiers.length, "Invalid tier index");
+        
+        claimTiers[tierIndex] = ClaimTier({
+            minTokens: minTokens,
+            maxClaims: maxClaims,
+            cooldownPeriod: cooldownPeriod
+        });
+        
+        emit TierUpdated(tierIndex, minTokens, maxClaims);
+    }
+    
+    /**
+     * @dev Actualiza configuración de alimentación
+     */
+    function setFeedConfig(
+        uint256 _feedCooldown,
+        uint256 _powerPerToken,
+        uint256 _maxPower
+    ) external onlyOwner {
+        feedCooldown = _feedCooldown;
+        powerPerToken = _powerPerToken;
+        maxPower = _maxPower;
+    }
+    
+    /**
+     * @dev Retira tokens acumulados del contrato
+     */
+    function withdrawTokens(address to, uint256 amount) external onlyOwner {
+        require(
+            governanceToken.transfer(to, amount),
+            "Transfer failed"
+        );
+    }
+    
+    // ============ FUNCIONES INTERNAS ============
+    
+    function _toString(uint256 value) internal pure returns (string memory) {
+        if (value == 0) {
+            return "0";
+        }
+        uint256 temp = value;
+        uint256 digits;
+        while (temp != 0) {
+            digits++;
+            temp /= 10;
+        }
+        bytes memory buffer = new bytes(digits);
+        while (value != 0) {
+            digits -= 1;
+            buffer[digits] = bytes1(uint8(48 + uint256(value % 10)));
+            value /= 10;
+        }
+        return string(buffer);
+    }
+    
+    // ============ OVERRIDES REQUERIDOS ============
+    
+    function _beforeTokenTransfer(
+        address from,
+        address to,
+        uint256 tokenId,
+        uint256 batchSize
+    ) internal virtual override(ERC721, ERC721Enumerable) {
+        super._beforeTokenTransfer(from, to, tokenId, batchSize);
+    }
+    
+    function supportsInterface(bytes4 interfaceId)
+        public
+        view
+        virtual
+        override(ERC721, ERC721Enumerable)
+        returns (bool)
+    {
+        return super.supportsInterface(interfaceId);
+    }
+}
