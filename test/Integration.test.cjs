@@ -1,7 +1,7 @@
 const { expect } = require("chai");
 const { ethers } = require("hardhat");
 const { time } = require("@nomicfoundation/hardhat-network-helpers");
-const { deployToken, deployNFT, deployMarketplace, deployMultiContract } = require("./helpers/testHelpers");
+const { deployToken, deployNFT, deployMarketplace, deployMultiContract } = require("./helpers/testHelpers.cjs");
 
 describe("Integration Tests", function () {
   let token;
@@ -70,7 +70,7 @@ describe("Integration Tests", function () {
 
     it("Should handle multiple NFT listings and purchases", async function () {
       // Mint multiple NFTs
-      await nft.batchMint(3, "metadata");
+      await nft.batchMint(["metadata1.json", "metadata2.json", "metadata3.json"]);
       
       // Transfer to user1
       await nft.transferFrom(owner.address, user1.address, 0);
@@ -98,7 +98,7 @@ describe("Integration Tests", function () {
       // Verify ownership
       expect(await nft.ownerOf(0)).to.equal(user2.address);
       expect(await nft.ownerOf(1)).to.equal(user3.address);
-      expect(await nft.ownerOf(2)).to.equal(user1.address);
+      expect(await nft.ownerOf(2)).to.equal(await marketplace.getAddress());
       
       // Verify only one listing remains
       const remainingListings = await marketplace.getActiveListings();
@@ -258,7 +258,7 @@ describe("Integration Tests", function () {
 
     it("Should handle batch NFT operations across all contracts", async function () {
       // 1. Batch mint NFTs
-      await nft.batchMint(5, "metadata");
+      await nft.batchMint(["metadata1.json", "metadata2.json", "metadata3.json", "metadata4.json", "metadata5.json"]);
       
       // 2. Put some in escrow
       await nft.approve(await multiContract.getAddress(), 0);

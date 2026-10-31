@@ -81,6 +81,19 @@ async function main() {
   const multiSigAddress = await multiSig.getAddress();
   console.log("✅ MultiSig deployed to:", multiSigAddress);
 
+  // 9. Deploy Faucet
+  console.log("\n📦 Deploying CSUITE Faucet...");
+  const CSUITEFaucet = await hre.ethers.getContractFactory("CSUITEFaucet");
+  const faucet = await CSUITEFaucet.deploy(csuiteAddress);
+  await faucet.waitForDeployment();
+  const faucetAddress = await faucet.getAddress();
+  console.log("✅ Faucet deployed to:", faucetAddress);
+
+  // Fund the faucet with tokens
+  console.log("\n💰 Funding Faucet with 100,000 CSUITE...");
+  await csuite.transfer(faucetAddress, hre.ethers.parseEther("100000"));
+  console.log("✅ Faucet funded!");
+
   // Summary
   console.log("\n" + "=".repeat(60));
   console.log("🎉 DEPLOYMENT COMPLETE!");
@@ -95,6 +108,7 @@ async function main() {
   console.log("Lending:         ", lendingAddress);
   console.log("NFT Auction:     ", nftAuctionAddress);
   console.log("MultiSig:        ", multiSigAddress);
+  console.log("Faucet:          ", faucetAddress);
   console.log("-".repeat(40));
 
   // Save addresses to file
@@ -111,7 +125,8 @@ async function main() {
       Governance: governanceAddress,
       Lending: lendingAddress,
       NFTAuction: nftAuctionAddress,
-      MultiSig: multiSigAddress
+      MultiSig: multiSigAddress,
+      Faucet: faucetAddress
     }
   };
 

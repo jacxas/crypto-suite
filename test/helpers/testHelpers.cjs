@@ -41,9 +41,9 @@ async function deployMarketplace(nftAddress, tokenAddress) {
 }
 
 // MultiContract helpers
-async function deployMultiContract(tokenAddress) {
+async function deployMultiContract(nftAddress, tokenAddress) {
   const MultiContract = await ethers.getContractFactory("MultiContract");
-  const multiContract = await MultiContract.deploy(tokenAddress);
+  const multiContract = await MultiContract.deploy(nftAddress, tokenAddress);
   await multiContract.waitForDeployment();
   return multiContract;
 }

@@ -42,3 +42,20 @@ export const CONTRACT_ADDRESSES = {
     multiContract: '',
   },
 };
+
+// Devuelve las direcciones de contrato para la cadena activa.
+// Anadido para las paginas de la A-Suite (Token.jsx usa esta firma).
+export const getContractAddresses = (chainId) => {
+  switch (chainId) {
+    case 31337:
+    case 1337:
+      return CONTRACT_ADDRESSES.localhost;
+    case 11155111:
+      return CONTRACT_ADDRESSES.sepolia;
+    case 137:
+      return CONTRACT_ADDRESSES.polygon;
+    default:
+      return CONTRACT_ADDRESSES.localhost;
+  }
+};
+

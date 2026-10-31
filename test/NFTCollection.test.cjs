@@ -1,6 +1,6 @@
 const { expect } = require("chai");
 const { ethers } = require("hardhat");
-const { deployNFT } = require("./helpers/testHelpers");
+const { deployNFT } = require("./helpers/testHelpers.cjs");
 
 describe("NFTCollection", function () {
   let nft;

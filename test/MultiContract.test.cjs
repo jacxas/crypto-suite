@@ -1,7 +1,7 @@
 const { expect } = require("chai");
 const { ethers } = require("hardhat");
 const { time } = require("@nomicfoundation/hardhat-network-helpers");
-const { deployToken, deployNFT, deployMultiContract } = require("./helpers/testHelpers");
+const { deployToken, deployNFT, deployMultiContract } = require("./helpers/testHelpers.cjs");
 
 describe("MultiContract", function () {
   let multiContract;

@@ -1,6 +1,6 @@
 const { expect } = require("chai");
 const { ethers } = require("hardhat");
-const { deployToken, deployNFT, deployMarketplace } = require("./helpers/testHelpers");
+const { deployToken, deployNFT, deployMarketplace } = require("./helpers/testHelpers.cjs");
 
 describe("NFTMarketplace", function () {
   let marketplace;

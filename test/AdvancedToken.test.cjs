@@ -1,6 +1,6 @@
 const { expect } = require("chai");
 const { ethers } = require("hardhat");
-const { increaseTime, deployToken } = require("./helpers/testHelpers");
+const { increaseTime, deployToken } = require("./helpers/testHelpers.cjs");
 
 describe("AdvancedToken", function () {
   let token;

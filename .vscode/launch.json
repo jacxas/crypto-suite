@@ -1,0 +1,39 @@
+{
+    "version": "0.2.0",
+    "configurations": [
+        
+        
+        
+        
+
+
+        
+
+
+
+
+        
+
+        {
+            "name": "Debug Crypto Suite",
+            "type": "node",
+            "request": "launch",
+            "program": "${workspaceFolder}/crypto-suite-complete.js",
+            "args": ["start"],
+            "console": "integratedTerminal",
+            "internalConsoleOptions": "neverOpen",
+            "env": {
+                "NODE_ENV": "development"
+            }
+        },
+        {
+            "name": "Deploy Contracts",
+            "type": "node",
+            "request": "launch",
+            "program": "${workspaceFolder}/crypto-suite-complete.js",
+            "args": ["deploy"],
+            "console": "integratedTerminal",
+            "internalConsoleOptions": "neverOpen"
+        }
+    ]
+}

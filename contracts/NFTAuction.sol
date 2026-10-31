@@ -3,8 +3,8 @@ pragma solidity ^0.8.0;
 
 import "@openzeppelin/contracts/token/ERC721/IERC721.sol";
 import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
-import "@openzeppelin/contracts/security/ReentrancyGuard.sol";
-import "@openzeppelin/contracts/security/Pausable.sol";
+import "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
+import "@openzeppelin/contracts/utils/Pausable.sol";
 import "@openzeppelin/contracts/access/Ownable.sol";
 
 /**
@@ -90,6 +90,11 @@ contract NFTAuction is ReentrancyGuard, Pausable, Ownable {
     event OfferCanceled(uint256 indexed offerId);
     event RoyaltySet(address indexed nftContract, address recipient, uint256 percentage);
     
+    // ============ Constructor ============
+
+    // OZ v5 exige pasar el owner inicial explicitamente.
+    constructor() Ownable(msg.sender) {}
+
     // ============ Auction Functions ============
     
     function createEnglishAuction(
