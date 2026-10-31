@@ -12,7 +12,9 @@
     "dev": "node --watch crypto-suite-complete.js start",
     "test": "node crypto-suite-complete.js test",
     "build": "cd frontend && npm run build",
-    "build:frontend": "cd frontend && npm run build && cd .."
+    "build:frontend": "cd frontend && npm run build && cd ..",
+    "deploy:asuite": "hardhat run scripts/deploy-asuite.cjs --network sepolia",
+    "deploy:asuite:local": "hardhat run scripts/deploy-asuite.cjs --network hardhat"
   },
   "dependencies": {
     "bcryptjs": "^2.4.3",
