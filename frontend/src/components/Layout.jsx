@@ -1,6 +1,6 @@
 import { Outlet, NavLink } from 'react-router-dom';
 import { ConnectButton } from '@rainbow-me/rainbowkit';
-import { FiHome, FiLayers, FiImage, FiLock, FiUsers, FiDroplet, FiCheckSquare, FiDollarSign, FiActivity, FiUser, FiTrendingUp, FiFileText, FiGrid, FiSend, FiGift } from 'react-icons/fi';
+import { FiHome, FiLayers, FiImage, FiLock, FiUsers, FiDroplet, FiCheckSquare, FiDollarSign, FiActivity, FiUser, FiTrendingUp, FiFileText, FiGrid, FiSend, FiGift, FiCpu } from 'react-icons/fi';
 import { GiHammer } from 'react-icons/gi';
 
 const navItems = [
@@ -11,6 +11,8 @@ const navItems = [
   { path: '/gallery', icon: FiGrid, label: 'Galería' },
   { path: '/token', icon: FiSend, label: 'Token' },
   { path: '/faucet', icon: FiGift, label: 'Faucet' },
+  // IA-Suite: los 10 tokens de inteligencia artificial
+  { path: '/ia-suite', icon: FiCpu, label: 'IA-Suite' },
   { path: '/staking', icon: FiLayers, label: 'Staking' },
   { path: '/farming', icon: FiDroplet, label: 'Yield Farming' },
   { path: '/lending', icon: FiDollarSign, label: 'Préstamos' },
