@@ -18,6 +18,7 @@ import TokenSpecs from './pages/TokenSpecs';
 import Gallery from './pages/Gallery';
 import Token from './pages/Token';
 import Faucet from './pages/Faucet';
+import IaSuite from './pages/IaSuite';
 
 function App() {
   return (
@@ -51,6 +52,7 @@ function App() {
           <Route path="gallery" element={<Gallery />} />
           <Route path="token" element={<Token />} />
           <Route path="faucet" element={<Faucet />} />
+          <Route path="ia-suite" element={<IaSuite />} />
         </Route>
       </Routes>
     </>
